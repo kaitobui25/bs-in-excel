@@ -1,12 +1,13 @@
 """Fast HTML-only browser for public web pages, with transparent search fallback."""
 from __future__ import annotations
 
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import quote_plus
 
 import requests
 from bs4 import BeautifulSoup
 
-from .browser import Link, PageData
+from .browser import PageData
+from .html_content import extract_page
 from .navigation import google_search_url
 
 
@@ -31,27 +32,8 @@ class HttpTextBrowser:
             raise ValueError("Trang không phải HTML và không thể hiển thị dưới dạng text.")
         soup = BeautifulSoup(response.content, "lxml")
         title = soup.title.get_text(" ", strip=True) if soup.title else response.url
-        for tag in soup.select("script, style, noscript, svg, picture, img, video, audio, iframe, canvas"):
-            tag.decompose()
-        root = soup.select_one("main, [role='main'], article") or soup.body or soup
-        for tag in root.select("nav, footer, aside"):
-            tag.decompose()
-        lines = [line.strip() for line in root.get_text("\n", strip=True).splitlines()]
-        text = "\n".join(line for line in lines if line)
-        links: list[Link] = []
-        seen: set[str] = set()
-        for anchor in root.select("a[href]"):
-            url = urljoin(response.url, anchor.get("href", ""))
-            if urlparse(url).scheme not in ("https", "http") or url in seen:
-                continue
-            name = anchor.get_text(" ", strip=True) or anchor.get("aria-label", "")
-            if len(name) < 2:
-                continue
-            seen.add(url)
-            links.append(Link(name[:130], url))
-            if len(links) >= 90:
-                break
-        return PageData(title=title, url=response.url, text=text, links=links)
+        text, links, blocks = extract_page(soup, response.url)
+        return PageData(title=title, url=response.url, text=text, links=links, blocks=blocks)
 
     def navigate(self, url: str) -> PageData:
         page = self._fetch(url)
@@ -65,11 +47,11 @@ class HttpTextBrowser:
         if len(page.links) < 5 and ("Google Search" in page.title or len(page.text) < 240):
             alternate = self._fetch("https://search.yahoo.co.jp/search?p=" + quote_plus(query))
             page = PageData(
-                title="Yahoo!検索 — kết quả dự phòng (Google hạn chế truy cập tự động)",
+                title=f"Kết quả tìm kiếm: {query}",
                 url=alternate.url,
-                text=("Google không cung cấp kết quả text cho yêu cầu tự động. "
-                      "Các kết quả sau đến từ Yahoo!検索, KHÔNG phải Google.\n\n" + alternate.text),
-                links=[Link("Mở Google trong trình duyệt ngoài", url)] + alternate.links,
+                text=alternate.text,
+                links=alternate.links,
+                blocks=alternate.blocks,
             )
         self.urls = self.urls[:self.position + 1] + [page.url]
         self.position += 1

@@ -64,30 +64,59 @@
   }
 
   function clickableLink(title, url) {
-    const button = make("button", title, "text-link");
-    button.type = "button";
-    button.title = url;
-    button.addEventListener("click", () => {
-      if (title === "Mở Google trong trình duyệt ngoài") {
-        if (typeof Office !== "undefined" && Office.context?.ui?.openBrowserWindow) {
-          Office.context.ui.openBrowserWindow(url);
-        } else {
-          window.open(url, "_blank", "noopener");
-        }
-      } else {
-        request("navigate", url);
+    const link = make("a", title, "text-link");
+    link.href = url;
+    link.dataset.nav = "true";
+    return link;
+  }
+
+  function renderPart(part) {
+    if (part.type === "image") {
+      const placeholder = part.url ? clickableLink("", part.url) : document.createElement("span");
+      placeholder.className = "image-placeholder";
+      placeholder.title = "Ảnh đã lọc";
+      placeholder.setAttribute("aria-label", "Ảnh đã lọc");
+      return placeholder;
+    }
+    if (part.type === "link" && part.url) {
+      return clickableLink(part.text || part.url, part.url);
+    }
+    return document.createTextNode(part.text || "");
+  }
+
+  function renderBlocks(blocks) {
+    const fragment = document.createDocumentFragment();
+    const tagNames = {
+      heading: "h2", item: "p", quote: "blockquote",
+      code: "pre", caption: "small", paragraph: "p"
+    };
+    for (const block of blocks) {
+      if (block.kind === "anchor") {
+        const marker = document.createElement("span");
+        marker.className = "anchor-target";
+        marker.id = block.id;
+        fragment.append(marker);
+        continue;
       }
-    });
-    return button;
+      const kind = Object.prototype.hasOwnProperty.call(tagNames, block.kind)
+        ? block.kind : "paragraph";
+      const element = document.createElement(tagNames[kind]);
+      element.className = "read-block block-" + kind;
+      for (const part of (block.parts || [])) element.append(renderPart(part));
+      fragment.append(element);
+    }
+    elements.content.replaceChildren(fragment);
   }
 
   function showPage(page) {
     elements.title.textContent = page.title || "Không có tiêu đề";
     elements.url.textContent = page.url;
     elements.address.value = page.url;
-    elements.content.textContent = page.text || "(Không trích xuất được nội dung văn bản.)";
+    const hasBlocks = Array.isArray(page.blocks) && page.blocks.length > 0;
+    if (hasBlocks) renderBlocks(page.blocks);
+    else elements.content.textContent = page.text || "(Không trích xuất được nội dung văn bản.)";
     elements.links.replaceChildren();
-    if (page.links.length) {
+    if (!hasBlocks && page.links.length) {
       elements.links.append(make("h2", "Liên kết (" + page.links.length + ")"));
       const list = document.createElement("ol");
       for (const link of page.links) {
@@ -97,9 +126,14 @@
       }
       elements.links.append(list);
     }
-    showOnly(elements.title, elements.url, elements.content, elements.links);
+    showOnly(elements.title, elements.url, elements.content, ...(hasBlocks ? [] : [elements.links]));
     setStatus("Đã tải · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự · " + page.links.length + " liên kết");
     $("viewport").scrollTop = 0;
+    if (hasBlocks && page.url.includes("#")) {
+      const fragmentId = decodeURIComponent(page.url.split("#")[1] || "");
+      const target = document.getElementById(fragmentId);
+      if (target) target.scrollIntoView({ block: "start" });
+    }
   }
 
   function showHistory(entries) {
@@ -121,6 +155,12 @@
     event.preventDefault();
     const command = parseAddress(elements.address.value);
     if (command) request(command.action, command.value);
+  });
+  $("viewport").addEventListener("click", event => {
+    const link = event.target.closest("a[data-nav]");
+    if (!link) return;
+    event.preventDefault();
+    request("navigate", link.href);
   });
   elements.back.addEventListener("click", () => request("back"));
   elements.forward.addEventListener("click", () => request("forward"));

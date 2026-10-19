@@ -5,7 +5,7 @@ are not modified. No cookies, credentials, or browsing profiles are exported.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
@@ -26,6 +26,7 @@ class PageData:
     url: str
     text: str
     links: list[Link]
+    blocks: list[dict] = field(default_factory=list)
 
 
 # Evaluate against the dedicated tab, returning JSON-compatible text only.

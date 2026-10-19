@@ -79,6 +79,7 @@ class BrowserService:
             "url": page.url,
             "text": page.text[:MAX_TEXT],
             "links": [asdict(link) for link in self.links],
+            "blocks": page.blocks,
         }}
 
     def close(self) -> None:

@@ -26,11 +26,13 @@ To reconfigure installation, run `Install Text Browser.cmd` once.
 - Search phrase: `siemens tia portal`
 - Click a result or one of the Back / Forward / Reload / History buttons.
 
-**Google Search limitation:** Google currently returns a redirect/interstitial
-instead of useful text to this PC's automated requests. In that case the tool
-shows results from Yahoo! Japan with an explicit fallback label. A link labeled
-"Mở Google trong trình duyệt ngoài" opens the real Google search in an external
-browser. Yahoo! results must not be mistaken for Google results.
+**Search:** Google currently returns a redirect/interstitial rather than useful
+text to automated requests on this PC, so the tool retrieves results from
+Yahoo! Japan instead. It shows a neutral search title without a technical
+fallback banner; the actual source remains visible in the address bar.
+Results are not represented as if they came directly from Google.
+Normal text links are clickable in their original reading positions.
+Filtered image positions display small empty picture outlines, not image data.
 
 ## Architecture
 
