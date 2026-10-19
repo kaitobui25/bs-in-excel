@@ -1,17 +1,17 @@
-"""Use the fast HTTP reader normally, real Chrome for JavaScript-only Facebook.
+"""Use fast HTTP normally, and the already-running Chrome Profile 3 for Facebook.
 
-One dedicated Chrome profile is kept outside Git and reused for the entire
-Excel add-in session. The user's existing Chrome profiles are untouched.
+Only an add-in-owned tab is navigated. Chrome's existing tabs, authentication
+state and profile files are never copied or modified by this application.
 """
 from __future__ import annotations
 
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
+from playwright.sync_api import Browser, Page, Playwright, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
-from .browser import PageData
-from .config import LOCAL_DATA, NAVIGATION_TIMEOUT_MS
+from .browser import PageData, read_cdp_endpoint
+from .config import NAVIGATION_TIMEOUT_MS
 from .html_content import extract_page
 from .http_browser import HttpTextBrowser
 
@@ -23,11 +23,11 @@ def is_facebook_url(url: str) -> bool:
 
 
 class FacebookChrome:
-    """Lazy Playwright connection to one independent, persistent Chrome window."""
+    """Attach to Profile 3 over CDP, reusing its signed-in Facebook session."""
 
     def __init__(self) -> None:
         self._playwright: Playwright | None = None
-        self._context: BrowserContext | None = None
+        self._browser: Browser | None = None
         self._page: Page | None = None
 
     @staticmethod
@@ -40,20 +40,25 @@ class FacebookChrome:
     def _connect(self) -> None:
         if self._page is not None and not self._page.is_closed():
             return
+        if self._playwright is not None:
+            self.close()
         self._playwright = sync_playwright().start()
         try:
-            self._context = self._playwright.chromium.launch_persistent_context(
-                user_data_dir=str(LOCAL_DATA / "facebook-chrome-profile"),
-                channel="chrome",
-                headless=False,
-                args=["--window-position=-30000,0", "--window-size=1000,740"],
-                viewport={"width": 970, "height": 700},
-                locale="ja-JP",
-                timeout=15_000,
+            self._browser = self._playwright.chromium.connect_over_cdp(
+                read_cdp_endpoint(), timeout=15_000,
             )
-            self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+            if not self._browser.contexts:
+                raise RuntimeError("Chrome Profile 3 chưa có phiên điều khiển.")
+            # NEVER select one of the user's existing Facebook/Chrome tabs.
+            self._page = self._browser.contexts[0].new_page()
             self._page.route("**/*", self._route)
             self._page.set_default_timeout(NAVIGATION_TIMEOUT_MS)
+        except PlaywrightTimeoutError as exc:
+            self.close()
+            raise RuntimeError(
+                "Chrome Profile 3 chưa cấp quyền Remote Debugging. "
+                "Kiểm tra cửa sổ Chrome và chọn Allow khi được hỏi."
+            ) from exc
         except BaseException:
             self.close()
             raise
@@ -69,7 +74,7 @@ class FacebookChrome:
         # to defeat authentication or claim private content was loaded.
         title = self._page.title() or self._page.url
         sign_in_wall = title == "Facebook" and self._page.locator('input[type="password"]').count() > 0
-        return PageData(title=self._page.title() or self._page.url,
+        return PageData(title=title,
                         url=self._page.url, text=text, links=links, blocks=blocks,
                         notice=("Facebook yêu cầu đăng nhập để xem Bảng tin và nội dung riêng tư. "
                                 "Bạn vẫn có thể mở các trang công khai bằng URL."
@@ -77,11 +82,14 @@ class FacebookChrome:
 
     def close(self) -> None:
         try:
-            if self._context is not None:
-                self._context.close()
+            if self._page is not None and not self._page.is_closed():
+                self._page.close()
         finally:
             self._page = None
-            self._context = None
+            if self._browser is not None:
+                # A CDP attachment disconnects here; it does not quit Chrome.
+                self._browser.close()
+                self._browser = None
             if self._playwright is not None:
                 self._playwright.stop()
                 self._playwright = None

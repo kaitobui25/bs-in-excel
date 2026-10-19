@@ -44,17 +44,18 @@ Filtered image positions display small empty picture outlines, not image data.
         -> plain text and clickable links
 
 HTTP is the fast default for normal sites. Facebook rejects plain HTTP
-requests, so Facebook URLs automatically launch **one** separate real Chrome
-instance offscreen, with its own persistent session under
-`%LOCALAPPDATA%\bs-in-excel\facebook-chrome-profile`. It is reused across
-links and Back/Forward, blocks image/video/font network requests and sends
-only text/links/empty image placeholders back to Excel. It does **not** use
-or modify your personal Chrome profiles. Public Facebook pages can be read;
-login-required feeds, private groups and posts require authentication and may
-still show a Facebook sign-in wall. The add-in shows a plain-text explanation
-for the signed-out homepage. No CAPTCHA/login bypass is attempted. The regular
-browser interface for entering Facebook credentials is outside the scope of
-this text-only add-in.
+requests, so Facebook URLs automatically **connect to Chrome Profile 3**
+using its already-enabled Remote Debugging endpoint. The add-in creates one
+dedicated Chrome tab and reuses it for Facebook links and Back/Forward.
+It never navigates or closes existing tabs. The existing signed-in session
+is used directly, without copying cookies, credentials, or profile files.
+Image/video/font requests are blocked only in the dedicated tab. Excel shows
+plain text, clickable links and empty image placeholders.
+
+Chrome must be running with Profile 3 and Remote Debugging enabled at
+chrome://inspect/#remote-debugging. Approve only your trusted local tools.
+Facebook access remains limited by your account permissions; there is no
+CAPTCHA or authentication bypass.
 
 If you need other client-rendered sites and approve Chrome Remote Debugging,
 set environment variable `BS_EXCEL_BROWSER_MODE=cdp` before starting the
@@ -64,8 +65,8 @@ the default mode.
 
 History and runtime logs are local under `%LOCALAPPDATA%\bs-in-excel\`.
 The HTTPS server binds to `127.0.0.1:3010`; website text is rendered via
-DOM textContent rather than inserting remote HTML. The same Chrome instance
-used for personal browsing is never touched by default.
+DOM textContent rather than inserting remote HTML. Only Facebook uses
+personal Chrome Profile 3, through a separately owned tab.
 
 The Office localhost certificate was observed to expire on **2026-11-04**.
 Renew the Office development certificate before that date if using the add-in
