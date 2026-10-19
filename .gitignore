@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.log
+*.tmp
+# Never commit personal workbooks or browser/session data.
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.xlam
+history.json
+DevToolsActivePort
