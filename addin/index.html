@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge"/>
+  <title>Text Browser · Excel</title>
+  <link rel="stylesheet" href="/style.css"/>
+  <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <main id="app">
+    <header class="toolbar">
+      <nav class="nav" aria-label="Navigation">
+        <button id="back" title="Quay lại" aria-label="Quay lại">←</button>
+        <button id="forward" title="Tiến tới" aria-label="Tiến tới">→</button>
+        <button id="reload" title="Tải lại" aria-label="Tải lại">↻</button>
+      </nav>
+      <form id="address-form" autocomplete="off">
+        <input id="address" type="text" aria-label="Địa chỉ hoặc từ khóa" placeholder="Nhập URL hoặc tìm Google…" spellcheck="false"/>
+        <button id="go" type="submit">Đi</button>
+      </form>
+      <button id="history" title="Lịch sử" aria-label="Lịch sử">Lịch sử</button>
+    </header>
+    <section class="statusbar" role="status" aria-live="polite">
+      <span id="status">Sẵn sàng</span>
+      <span class="mode">TEXT ONLY</span>
+    </section>
+    <article id="viewport">
+      <div id="welcome">
+        <h2>Duyệt web ngay trong Excel</h2>
+        <p>Nhập một địa chỉ hoặc từ khóa vào thanh trên. Nội dung trang và kết quả tìm kiếm xuất hiện tại đây.</p>
+        <p class="examples"><button type="button" id="sample-siemens">Siemens TIA Portal</button> <button type="button" id="sample-google">Tìm: siemens tia portal</button></p>
+      </div>
+      <h1 id="title" hidden></h1>
+      <div id="page-url" hidden></div>
+      <pre id="content" hidden></pre>
+      <div id="links" hidden></div>
+      <div id="history-list" hidden></div>
+    </article>
+  </main>
+</body>
+</html>

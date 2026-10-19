@@ -1,67 +1,85 @@
-# Excel Text Browser
+# Excel Text Browser — Content Add-in
 
-A compact text-only web browser that runs inside an already-open Microsoft Excel workbook.
-The Python process attaches to a Chrome instance via its existing Chrome DevTools Protocol (CDP) endpoint. It creates one dedicated tab in the existing browser session and never reads or changes other tabs.
+Minimal text-only browsing directly inside Microsoft Excel.
 
-## Requirements
+The new UI is an Office Content Add-in, inspired by the existing
+LamLongChart example under C:\phong\AI\finance\LamLongChart\examples\excel-content-addin.
+It provides an address/search field, Back, Forward, Reload, History and clickable
+links. No C4, no Excel-cell commands and no PowerShell while browsing.
 
-- Windows + desktop Excel (tested with Office 64-bit)
-- Chrome running with Remote Debugging enabled via chrome://inspect/#remote-debugging
-- Python 3.12+ and packages from requirements.txt
+Chrome Profile 3 is reused through its existing CDP Remote Debugging endpoint.
+Web pages execute inside Chrome; Excel displays only text, no images or videos.
+The add-in uses lightweight HTML, CSS and JavaScript for buttons and links;
+Java (the programming language) is not used.
 
-## Install and start
+## First-time setup on this PC
 
-Open the workbook in Excel. From this directory run the following PowerShell commands:
+1. Double-click Install Text Browser.cmd in the repository folder. This checks
+   dependencies, starts the HTTPS backend hidden and configures automatic startup
+   on Windows sign-in for the current user (HKCU Run). This is a one-time action.
+2. In Excel select Home > Add-ins > My Add-ins > Manage My Add-ins > Upload My Add-in.
+3. Select the manifest:
+   C:\phong\AI\other\bs-in-excel\main\addin\manifest.xml
+4. Choose Text Browser and insert it into your workbook. Save the workbook
+   if you wish to keep the embedded content add-in.
 
-    python -m pip install -r requirements.txt
-    powershell -ExecutionPolicy Bypass -File .\start.ps1
+The installer reuses the HTTPS certificate already installed for L2Chart.
+Its observed expiry on this PC is November 4, 2026; renew it before then.
+If you prefer not to enable automatic startup, you can run install_once.ps1
+with -NoAutoStart and double-click Open Text Browser.vbs whenever needed.
 
-The launcher starts one Python process without a visible console. It creates a "Text Browser" sheet in the active workbook, without touching your other sheets. **The workbook is not saved automatically.**
+## Daily use
 
-## How to use it
+Type directly in the add-in address bar.
 
-Enter a URL or a search query into **C4**, then press Enter.
+- Siemens page: https://www.siemens.com/ja-jp/products/tia-portal/
+- Google query: siemens tia portal
+- Click a result or link to open it.
+- Use Back, Forward, Reload, History buttons; no command syntax.
 
-| Input | Result |
-| --- | --- |
-| https://www.siemens.com/ja-jp/products/tia-portal/ | Visit Siemens TIA Portal |
-| siemens tia portal | Search on Google |
-| :open 1 | Open displayed link number 1 |
-| :back | Go back |
-| :forward | Go forward |
-| :reload | Reload page |
-| :history | Show recently visited pages |
-| :help | Show help |
+The backend runs locally at https://localhost:3010, hidden and without
+a terminal window. The add-in doesn't touch workbook cells, formulas, or
+other sheets. History stays under %LOCALAPPDATA%\bs-in-excel\, outside Git.
 
-The tool writes the page title, URL, extracted visible text, and numbered links into Excel. It does not embed a web view or display images/video. Chrome can execute JavaScript required by the website, but Excel shows only text.
+## Architecture
 
-## Organization
+    Excel Content Add-in (HTML/CSS/JS)
+        -> HTTPS loopback API (text_browser/service.py)
+        -> one existing Chrome Profile 3 CDP session
+        -> visible page text + clickable links + history
 
-- text_browser/navigation.py: pure command parsing, URL and Google query detection
-- text_browser/browser.py: CDP connection and DOM text/link extraction
-- text_browser/excel_ui.py: formatted worksheet and bulk COM range updates
-- text_browser/history.py: local, atomic JSON history
-- text_browser/__main__.py: application coordinator and polling loop
-- tests/: isolated unit tests
+Browser startup is lazy: one dedicated Chrome tab is created on first browse
+and reused. Image, media and font requests are blocked only for that tab.
+The single-threaded HTTP server keeps sync Playwright calls on one thread.
+All website content enters the add-in as textContent, never as raw HTML.
 
-Test:
+Files:
+- addin/: Office manifest and minimal text-only UI
+- text_browser/service.py: HTTPS loopback API
+- text_browser/browser.py: Chrome CDP and text/link extraction
+- text_browser/history.py: local history
+- tests/: unit and HTTP tests
+- Install Text Browser.cmd / install_once.ps1: one-time installer
+- Open Text Browser.vbs: optional hidden launcher
+- run_addin.pyw: backend Windows entry point
+
+The old COM/C4 polling implementation has been removed. There is only one
+supported integration path: the Excel Content Add-in.
+
+## Tests
 
     python -m unittest discover -s tests -v
+    node --check addin/app.js
 
-## Performance
+The backend was tested live on this PC against the Siemens TIA Portal page
+and Google search for "siemens tia portal". Actual Excel Office Add-in
+integration still requires uploading the manifest once.
 
-Excel is polled every 450 ms, and page output is written in one rectangular COM assignment, not thousands of individual cell calls. Only one existing Chrome instance and one app-owned tab are used. Images, media, and web fonts are blocked for that tab. The app waits for DOM content, not network idle, so third-party advertising calls do not hold up the UI.
+## Security and limits
 
-## Storage and security
-
-History and logs are stored in %LOCALAPPDATA%\bs-in-excel\, outside this Git checkout.
-The tool does not export cookies, credentials, browsing history from Chrome, or Chrome's user-data directory. The project uses Chrome's localhost-only CDP port and creates a dedicated tab.
-
-Remote Debugging allows extensive browser control and should be enabled only for trusted local applications. The tool does not bypass CAPTCHA or restricted pages. Google search may show consent, anti-automation checks, or localized results. Excel is responsive while a page loads, but the Python worker processes one navigation command at a time.
-
-## Troubleshooting
-
-- Nothing appears in Excel: ensure an ordinary workbook is active (not PERSONAL.XLSB) before starting; check stderr.log under %LOCALAPPDATA%\bs-in-excel\.
-- Chrome disconnected: verify Chrome Remote Debugging is enabled and DevToolsActivePort exists in the Chrome User Data directory. If Chrome shows "Allow remote debugging?", you must personally approve the trusted connection before relaunching the app.
-- Web page incomplete: dynamic sites may need more time or interaction; the parser uses visible DOM text, not pixel rendering.
-- To stop: end the specific Python process shown by start.ps1 or exit that process normally.
+- The HTTPS service listens only at 127.0.0.1 and validates POST Origin.
+- Chrome remote debugging grants broad browser access. Trust only known tools.
+- Cookies and credentials are not exported to the source repository.
+- CAPTCHA, login gates and complex interactive websites may not yield text.
+- Google may enforce its own automated-access restrictions.
+- The localhost certificate must be renewed before it expires.
