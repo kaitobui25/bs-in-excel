@@ -6,14 +6,14 @@
     back: $("back"), forward: $("forward"), reload: $("reload"),
     history: $("history"), status: $("status"),
     welcome: $("welcome"), title: $("title"), url: $("page-url"),
-    content: $("content"), links: $("links"), historyList: $("history-list")
+    notice: $("page-notice"), content: $("content"), links: $("links"), historyList: $("history-list")
   };
   let busy = false;
 
   const setStatus = message => { elements.status.textContent = message; };
   const showOnly = (...visible) => {
     for (const element of [
-      elements.welcome, elements.title, elements.url,
+      elements.welcome, elements.title, elements.url, elements.notice,
       elements.content, elements.links, elements.historyList
     ]) element.hidden = !visible.includes(element);
   };
@@ -111,6 +111,7 @@
   function showPage(page) {
     elements.title.textContent = page.title || "Không có tiêu đề";
     elements.url.textContent = page.url;
+    elements.notice.textContent = page.notice || "";
     elements.address.value = page.url;
     const hasBlocks = Array.isArray(page.blocks) && page.blocks.length > 0;
     if (hasBlocks) renderBlocks(page.blocks);
@@ -126,7 +127,8 @@
       }
       elements.links.append(list);
     }
-    showOnly(elements.title, elements.url, elements.content, ...(hasBlocks ? [] : [elements.links]));
+    showOnly(elements.title, elements.url, elements.content,
+      ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
     setStatus("Đã tải · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự · " + page.links.length + " liên kết");
     $("viewport").scrollTop = 0;
     if (hasBlocks && page.url.includes("#")) {
@@ -168,6 +170,7 @@
   elements.history.addEventListener("click", () => request("history"));
   $("sample-siemens").addEventListener("click", () => request("navigate",
     "https://www.siemens.com/ja-jp/products/tia-portal/"));
+  $("sample-facebook").addEventListener("click", () => request("navigate", "https://www.facebook.com/"));
   $("sample-google").addEventListener("click", () => {
     elements.address.value = "siemens tia portal";
     request("search", "siemens tia portal");

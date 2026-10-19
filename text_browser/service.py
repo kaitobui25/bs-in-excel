@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from .browser import Link, PageData
 from .http_browser import HttpTextBrowser
+from .hybrid_browser import HybridTextBrowser
 from .config import LOCAL_DATA, MAX_LINKS
 from .history import HistoryStore
 
@@ -38,7 +39,7 @@ class BrowserService:
             from .browser import ChromeTextBrowser
             self.browser = ChromeTextBrowser()
         else:
-            self.browser = HttpTextBrowser()
+            self.browser = HybridTextBrowser()
         self.history = history or HistoryStore(LOCAL_DATA / "history.json")
         self.links: list[Link] = []
         self.current: PageData | None = None
@@ -80,6 +81,7 @@ class BrowserService:
             "text": page.text[:MAX_TEXT],
             "links": [asdict(link) for link in self.links],
             "blocks": page.blocks,
+            "notice": page.notice,
         }}
 
     def close(self) -> None:

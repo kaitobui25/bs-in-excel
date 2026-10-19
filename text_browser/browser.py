@@ -27,6 +27,7 @@ class PageData:
     text: str
     links: list[Link]
     blocks: list[dict] = field(default_factory=list)
+    notice: str = ""
 
 
 # Evaluate against the dedicated tab, returning JSON-compatible text only.

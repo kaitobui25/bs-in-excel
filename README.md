@@ -23,6 +23,8 @@ To reconfigure installation, run `Install Text Browser.cmd` once.
 ## Usage
 
 - URL: `https://www.siemens.com/ja-jp/products/tia-portal/`
+- Facebook: `https://www.facebook.com/` or public pages such as
+  `https://www.facebook.com/Siemens/`
 - Search phrase: `siemens tia portal`
 - Click a result or one of the Back / Forward / Reload / History buttons.
 
@@ -41,8 +43,20 @@ Filtered image positions display small empty picture outlines, not image data.
         -> HTML requests + parser (text_browser/http_browser.py)
         -> plain text and clickable links
 
-HTTP is the fast default; it does not launch or control Chrome. If you need
-client-rendered sites and are willing to approve Chrome Remote Debugging,
+HTTP is the fast default for normal sites. Facebook rejects plain HTTP
+requests, so Facebook URLs automatically launch **one** separate real Chrome
+instance offscreen, with its own persistent session under
+`%LOCALAPPDATA%\bs-in-excel\facebook-chrome-profile`. It is reused across
+links and Back/Forward, blocks image/video/font network requests and sends
+only text/links/empty image placeholders back to Excel. It does **not** use
+or modify your personal Chrome profiles. Public Facebook pages can be read;
+login-required feeds, private groups and posts require authentication and may
+still show a Facebook sign-in wall. The add-in shows a plain-text explanation
+for the signed-out homepage. No CAPTCHA/login bypass is attempted. The regular
+browser interface for entering Facebook credentials is outside the scope of
+this text-only add-in.
+
+If you need other client-rendered sites and approve Chrome Remote Debugging,
 set environment variable `BS_EXCEL_BROWSER_MODE=cdp` before starting the
 backend. That optional mode uses Playwright and Chrome Profile 3 and can be
 limited by browser consent/permissions. No login or cookies are copied by
