@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import ssl
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .browser import ChromeTextBrowser, Link, PageData
+from .browser import Link, PageData
+from .http_browser import HttpTextBrowser
 from .config import LOCAL_DATA, MAX_LINKS
 from .history import HistoryStore
 
@@ -29,8 +31,14 @@ MAX_TEXT = 45_000
 
 
 class BrowserService:
-    def __init__(self, browser: ChromeTextBrowser | None = None, history: HistoryStore | None = None):
-        self.browser = browser or ChromeTextBrowser()
+    def __init__(self, browser=None, history: HistoryStore | None = None):
+        if browser is not None:
+            self.browser = browser
+        elif os.environ.get("BS_EXCEL_BROWSER_MODE", "http").lower() == "cdp":
+            from .browser import ChromeTextBrowser
+            self.browser = ChromeTextBrowser()
+        else:
+            self.browser = HttpTextBrowser()
         self.history = history or HistoryStore(LOCAL_DATA / "history.json")
         self.links: list[Link] = []
         self.current: PageData | None = None

@@ -9,5 +9,5 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo Installation ready. In Excel, upload the manifest shown above (one time).
+echo Installation ready. Double-click Text Browser Excel on the Desktop.
 pause

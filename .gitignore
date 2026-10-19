@@ -8,6 +8,7 @@ venv/
 # Never commit personal workbooks or browser/session data.
 *.xls
 *.xlsx
+!Text Browser.xlsx
 *.xlsm
 *.xlsb
 *.xlam

@@ -67,7 +67,17 @@
     const button = make("button", title, "text-link");
     button.type = "button";
     button.title = url;
-    button.addEventListener("click", () => request("navigate", url));
+    button.addEventListener("click", () => {
+      if (title === "Mở Google trong trình duyệt ngoài") {
+        if (typeof Office !== "undefined" && Office.context?.ui?.openBrowserWindow) {
+          Office.context.ui.openBrowserWindow(url);
+        } else {
+          window.open(url, "_blank", "noopener");
+        }
+      } else {
+        request("navigate", url);
+      }
+    });
     return button;
   }
 

@@ -1,85 +1,71 @@
-# Excel Text Browser — Content Add-in
+# Text Browser in Excel
 
-Minimal text-only browsing directly inside Microsoft Excel.
+A minimal, text-only Excel Content Add-in. Open URLs, search, follow links,
+Back / Forward / Reload and History. No images or videos are shown. No VBA,
+Excel-cell polling or terminal is required for daily use.
 
-The new UI is an Office Content Add-in, inspired by the existing
-LamLongChart example under C:\phong\AI\finance\LamLongChart\examples\excel-content-addin.
-It provides an address/search field, Back, Forward, Reload, History and clickable
-links. No C4, no Excel-cell commands and no PowerShell while browsing.
+## Current Windows PC: one-click startup
 
-Chrome Profile 3 is reused through its existing CDP Remote Debugging endpoint.
-Web pages execute inside Chrome; Excel displays only text, no images or videos.
-The add-in uses lightweight HTML, CSS and JavaScript for buttons and links;
-Java (the programming language) is not used.
+1. Double-click the **Text Browser Excel** desktop shortcut, or run
+   `Open Text Browser.vbs` in this folder.
+2. An Excel workbook opens with an embedded text browser. Type into its
+   address bar, press Enter, or click the on-screen buttons.
 
-## First-time setup on this PC
+The reusable workbook is `Text Browser.xlsx` next to this README. Its Office
+Content Add-in manifest points to the local trusted catalog at
+`\\localhost\C$\phong\AI\other\bs-in-excel\main\addin`. This path is specific
+to the current PC; other PCs require their own catalog registration.
 
-1. Double-click Install Text Browser.cmd in the repository folder. This checks
-   dependencies, starts the HTTPS backend hidden and configures automatic startup
-   on Windows sign-in for the current user (HKCU Run). This is a one-time action.
-2. In Excel select Home > Add-ins > My Add-ins > Manage My Add-ins > Upload My Add-in.
-3. Select the manifest:
-   C:\phong\AI\other\bs-in-excel\main\addin\manifest.xml
-4. Choose Text Browser and insert it into your workbook. Save the workbook
-   if you wish to keep the embedded content add-in.
+The launcher starts the backend hidden if it is not already running. The
+backend is also configured to start automatically at Windows sign-in.
+To reconfigure installation, run `Install Text Browser.cmd` once.
 
-The installer reuses the HTTPS certificate already installed for L2Chart.
-Its observed expiry on this PC is November 4, 2026; renew it before then.
-If you prefer not to enable automatic startup, you can run install_once.ps1
-with -NoAutoStart and double-click Open Text Browser.vbs whenever needed.
+## Usage
 
-## Daily use
+- URL: `https://www.siemens.com/ja-jp/products/tia-portal/`
+- Search phrase: `siemens tia portal`
+- Click a result or one of the Back / Forward / Reload / History buttons.
 
-Type directly in the add-in address bar.
-
-- Siemens page: https://www.siemens.com/ja-jp/products/tia-portal/
-- Google query: siemens tia portal
-- Click a result or link to open it.
-- Use Back, Forward, Reload, History buttons; no command syntax.
-
-The backend runs locally at https://localhost:3010, hidden and without
-a terminal window. The add-in doesn't touch workbook cells, formulas, or
-other sheets. History stays under %LOCALAPPDATA%\bs-in-excel\, outside Git.
+**Google Search limitation:** Google currently returns a redirect/interstitial
+instead of useful text to this PC's automated requests. In that case the tool
+shows results from Yahoo! Japan with an explicit fallback label. A link labeled
+"Mở Google trong trình duyệt ngoài" opens the real Google search in an external
+browser. Yahoo! results must not be mistaken for Google results.
 
 ## Architecture
 
-    Excel Content Add-in (HTML/CSS/JS)
-        -> HTTPS loopback API (text_browser/service.py)
-        -> one existing Chrome Profile 3 CDP session
-        -> visible page text + clickable links + history
+    Excel Content Add-in (addin/index.html, app.js, style.css)
+        -> HTTPS localhost API (text_browser/service.py)
+        -> HTML requests + parser (text_browser/http_browser.py)
+        -> plain text and clickable links
 
-Browser startup is lazy: one dedicated Chrome tab is created on first browse
-and reused. Image, media and font requests are blocked only for that tab.
-The single-threaded HTTP server keeps sync Playwright calls on one thread.
-All website content enters the add-in as textContent, never as raw HTML.
+HTTP is the fast default; it does not launch or control Chrome. If you need
+client-rendered sites and are willing to approve Chrome Remote Debugging,
+set environment variable `BS_EXCEL_BROWSER_MODE=cdp` before starting the
+backend. That optional mode uses Playwright and Chrome Profile 3 and can be
+limited by browser consent/permissions. No login or cookies are copied by
+the default mode.
 
-Files:
-- addin/: Office manifest and minimal text-only UI
-- text_browser/service.py: HTTPS loopback API
-- text_browser/browser.py: Chrome CDP and text/link extraction
-- text_browser/history.py: local history
-- tests/: unit and HTTP tests
-- Install Text Browser.cmd / install_once.ps1: one-time installer
-- Open Text Browser.vbs: optional hidden launcher
-- run_addin.pyw: backend Windows entry point
+History and runtime logs are local under `%LOCALAPPDATA%\bs-in-excel\`.
+The HTTPS server binds to `127.0.0.1:3010`; website text is rendered via
+DOM textContent rather than inserting remote HTML. The same Chrome instance
+used for personal browsing is never touched by default.
 
-The old COM/C4 polling implementation has been removed. There is only one
-supported integration path: the Excel Content Add-in.
+The Office localhost certificate was observed to expire on **2026-11-04**.
+Renew the Office development certificate before that date if using the add-in
+beyond the current development period.
 
-## Tests
+## Development
 
+    python -m pip install -r requirements.txt
     python -m unittest discover -s tests -v
     node --check addin/app.js
 
-The backend was tested live on this PC against the Siemens TIA Portal page
-and Google search for "siemens tia portal". Actual Excel Office Add-in
-integration still requires uploading the manifest once.
+The Office Content Add-in was installed using a trusted **FileSystem** catalog
+reference. The earlier dev-settings-generated workbook with the `Registry`
+reference caused "only available during debugging" and should not be used.
 
-## Security and limits
-
-- The HTTPS service listens only at 127.0.0.1 and validates POST Origin.
-- Chrome remote debugging grants broad browser access. Trust only known tools.
-- Cookies and credentials are not exported to the source repository.
-- CAPTCHA, login gates and complex interactive websites may not yield text.
-- Google may enforce its own automated-access restrictions.
-- The localhost certificate must be renewed before it expires.
+This is a local development deployment, not a public Office marketplace add-in.
+The starter workbook was generated with Microsoft's `office-addin-dev-settings`
+development tooling (MIT licensed) and its web-extension reference was changed
+to the local trusted `FileSystem` catalog for regular use.

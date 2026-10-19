@@ -6,7 +6,7 @@ $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
 if (-not (Test-Path -LiteralPath $pythonw)) {
     throw 'Python Windows launcher (pythonw.exe) not found next to python.exe.'
 }
-& $python -c 'import playwright.sync_api'
+& $python -c 'import playwright.sync_api, requests, bs4, lxml'
 if ($LASTEXITCODE -ne 0) {
     & $python -m pip install -r (Join-Path $root 'requirements.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Python dependencies installation failed.' }
@@ -31,4 +31,17 @@ if (-not $alreadyListening) {
 }
 Write-Host 'Backend configured. The Excel add-in manifest is:'
 Write-Host (Join-Path $root 'addin\manifest.xml')
-Write-Host 'Upload this manifest in Excel: Home > Add-ins > My Add-ins > Upload My Add-in (once).'
+$workbook = Join-Path $root 'Text Browser.xlsx'
+if (Test-Path -LiteralPath $workbook) {
+    $shell = New-Object -ComObject WScript.Shell
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'Text Browser Excel.lnk'))
+    $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
+    $shortcut.Arguments = ('"' + (Join-Path $root 'Open Text Browser.vbs') + '"')
+    $shortcut.WorkingDirectory = $root
+    $shortcut.Description = 'Open text-only browser inside Excel'
+    $shortcut.Save()
+    Write-Host 'Ready: double-click Text Browser Excel on your Desktop.'
+} else {
+    Write-Host 'Workbook template missing; see README.md for setup.'
+}
