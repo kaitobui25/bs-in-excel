@@ -82,6 +82,10 @@ blocked on the add-in's Neo tab through page-scoped CDP where supported;
 some network media requests may still occur inside Neo. No media is shown in
 Excel. The reader caps a feed at 80 posts and 3,500 characters per post for
 responsiveness. The Neo `run` API has a 30-second limit per batch.
+When present, `[data-ad-preview="message"]` supplies post body text, excluding
+Facebook's obfuscated timestamp links near the author. Shared preview links
+and whole-card ad metadata are still considered; older layouts without a
+message element fall back to the card text.
 The reader skips posts explicitly marked as sponsored (including Vietnamese,
 English and Japanese labels) and unlabelled commercial promotions, identified
 using a combination of sales calls to action (inbox/order/contact), price,

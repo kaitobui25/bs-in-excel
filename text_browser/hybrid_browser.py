@@ -72,7 +72,10 @@ FACEBOOK_POSTS = r"""
       return /^(?:send message|contact us|shop now|buy now|visit website|book now|call now|gửi tin nhắn|nhắn tin|liên hệ|mua ngay|メッセージを送信|傳送訊息|發送訊息)$/iu.test(label);
     });
     const author = (el.querySelector('h3, h4')?.innerText || '').split('\n')[0].trim().slice(0, 120);
-    const text = (el.innerText || '')
+    // The card header contains a Facebook-generated timestamp link whose
+    // characters are individually positioned (and can include U+034F).
+    // Read the actual post body instead of flattening that header into text.
+    const text = ((message || el).innerText || '')
       .replace(/[\u200b-\u200f\ufeff]/g, '')
       .split(/\n+/).map(line => line.trim())
       .filter(line => line && line !== 'Facebook' && !/^[\s$\/|·•]+$/.test(line))
@@ -80,6 +83,9 @@ FACEBOOK_POSTS = r"""
     const links = [];
     const seen = new Set();
     for (const a of el.querySelectorAll('a[href]')) {
+      // Ignore the obfuscated timestamp link, but retain links in previews
+      // outside the message body (for example, shared article cards).
+      if (((a.textContent || '').match(/\u034f/g) || []).length >= 10) continue;
       if (!visible(a) || !/^https?:\/\//i.test(a.href) || seen.has(a.href)) continue;
       const title = (a.innerText || a.getAttribute('aria-label') || '').trim();
       if (title.length < 2) continue;
