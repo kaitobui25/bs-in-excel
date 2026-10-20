@@ -54,6 +54,10 @@ h2 { font-size: 16px; margin: 20px 0 10px; }
 #content .block-post { max-width: 780px; margin: 0 0 16px; padding: 15px 18px; border: 1px solid var(--line); border-radius: 9px; background: #fff; white-space: normal; }
 .post-author { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
 .post-body { white-space: pre-wrap; line-height: 1.7; }
+.post-body.post-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.post-toggle { border: 0; background: none; color: var(--accent); padding: 4px 0; font-weight: 600; }
+.post-toggle:hover { background: none; text-decoration: underline; }
+.block-post.post-collapsed .post-links { display: none; }
 .post-links { display: flex; flex-wrap: wrap; gap: 8px 14px; padding-top: 11px; margin-top: 11px; border-top: 1px solid var(--line); font-size: 12px; }
 #load-more { display: block; margin: 4px auto 28px; padding: 10px 20px; color: var(--accent); border-color: var(--accent); font-weight: 600; }
 #content a.text-link + a.text-link { margin-left: 0.4em; }

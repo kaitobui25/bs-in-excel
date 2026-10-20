@@ -68,6 +68,16 @@ class HTTPTests(unittest.TestCase):
         self.assertNotIn('id="page-url"', html)
         self.assertIn('id="address"', html)
 
+    def test_facebook_post_preview_assets(self):
+        _, script, _ = self.make_request("GET", "/app.js")
+        _, css, _ = self.make_request("GET", "/style.css")
+        script, css = script.decode("utf-8"), css.decode("utf-8")
+        self.assertIn('make("button", expanded ? "See less" : "See more"', script)
+        self.assertIn('window.addEventListener("resize", updatePostPreviews)', script)
+        self.assertIn('if (action !== "more") expandedPosts.clear()', script)
+        self.assertIn('-webkit-line-clamp: 4', css)
+        self.assertIn('.block-post.post-collapsed .post-links', css)
+
     def test_search_action_json(self):
         body = json.dumps({"action": "search", "value": "siemens tia portal"}).encode()
         code, data, _ = self.make_request("POST", "/api/browse", body)

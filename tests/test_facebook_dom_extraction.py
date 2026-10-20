@@ -25,7 +25,7 @@ const previewLink = {
 };
 const headerLink = {href: 'https://facebook.com/?__cft__=abc', innerText: scrambled, textContent: scrambled};
 const message = {
-  innerText: text,
+  innerText: text + ' See less',
   querySelectorAll: selector => selector === 'a[href]' ? [messageLink] : [],
 };
 const card = {
@@ -72,6 +72,7 @@ console.log(JSON.stringify({withMessage, fallback}));
         self.assertTrue(post["text"].startswith("Chào cả nhà"))
         self.assertIn("QUY MÔ GAME\n• Hai phe.", post["text"])
         self.assertNotIn("\u034f", post["text"])
+        self.assertNotIn("See less", post["text"])
         self.assertEqual(post["links"], [
             {"title": "Tài liệu", "url": "https://example.com/guide"},
             {"title": "Bài chia sẻ", "url": "https://example.com/story"},

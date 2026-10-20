@@ -12,6 +12,7 @@
   };
   let busy = false;
   let autoLoadEnabled = false;
+  const expandedPosts = new Set();
 
   const setStatus = message => { elements.status.textContent = message; };
   const showError = message => {
@@ -73,6 +74,7 @@
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "HTTP " + response.status);
+      if (action !== "more") expandedPosts.clear();
       if (data.history) showHistory(data.history);
       else if (data.page) showPage(data.page, action === "more");
     } catch (error) {
@@ -105,6 +107,7 @@
 
   function renderBlocks(blocks) {
     const fragment = document.createDocumentFragment();
+    let postIndex = 0;
     const tagNames = {
       heading: "h2", item: "p", quote: "blockquote",
       code: "pre", caption: "small", paragraph: "p"
@@ -123,16 +126,26 @@
       const element = document.createElement(isPost ? "section" : tagNames[kind]);
       element.className = "read-block block-" + (isPost ? "post" : kind);
       if (isPost) {
+        const key = String(block.key ?? `index:${postIndex}`);
         const author = block.author || "";
         const header = make("div", author || "Bài viết " + (fragment.querySelectorAll(".block-post").length + 1), "post-author");
         const body = make("div", "", "post-body");
+        body.id = `post-body-${postIndex++}`;
+        element.dataset.postKey = key;
+        const expanded = expandedPosts.has(key);
+        body.classList.toggle("post-clamped", !expanded);
+        const toggle = make("button", expanded ? "See less" : "See more", "post-toggle");
+        toggle.type = "button";
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.setAttribute("aria-controls", body.id);
+        toggle.hidden = !expanded;
         const actions = make("div", "", "post-links");
         for (const part of (block.parts || [])) {
           const content = part.type === "text" && author && part.text.startsWith(author + "\n")
             ? { ...part, text: part.text.slice(author.length + 1) } : part;
           (part.type === "link" ? actions : body).append(renderPart(content));
         }
-        element.append(header, body);
+        element.append(header, body, toggle);
         if (actions.childNodes.length) element.append(actions);
       } else {
         for (const part of (block.parts || [])) element.append(renderPart(part));
@@ -140,6 +153,19 @@
       fragment.append(element);
     }
     elements.content.replaceChildren(fragment);
+  }
+
+  // Check layout only after a render or resize; no mouse/scroll polling.
+  function updatePostPreviews() {
+    for (const post of elements.content.querySelectorAll(".block-post")) {
+      const body = post.querySelector(".post-body");
+      const toggle = post.querySelector(".post-toggle");
+      if (!body || !toggle) continue;
+      const expanded = expandedPosts.has(post.dataset.postKey);
+      const truncated = !expanded && body.scrollHeight > body.clientHeight + 1;
+      post.classList.toggle("post-collapsed", truncated);
+      toggle.hidden = !expanded && !truncated;
+    }
   }
 
   function showPage(page, keepPosition = false) {
@@ -165,6 +191,7 @@
     showOnly(...(showTitle ? [elements.title] : []), elements.content,
       ...(page.has_more ? [elements.loadMore] : []),
       ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
+    if (hasBlocks) updatePostPreviews();
     const postCount = hasBlocks ? page.blocks.filter(block => block.kind === "post").length : 0;
     autoLoadEnabled = postCount > 0 && Boolean(page.has_more) && !page.notice;
     setStatus(postCount
@@ -205,6 +232,20 @@
     event.preventDefault();
     request("navigate", link.href);
   });
+  elements.content.addEventListener("click", event => {
+    const toggle = event.target.closest("button.post-toggle");
+    if (!toggle) return;
+    const post = toggle.closest(".block-post");
+    const key = post.dataset.postKey;
+    const expanded = !expandedPosts.has(key);
+    if (expanded) expandedPosts.add(key);
+    else expandedPosts.delete(key);
+    post.querySelector(".post-body").classList.toggle("post-clamped", !expanded);
+    toggle.textContent = expanded ? "See less" : "See more";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    updatePostPreviews();
+  });
+  window.addEventListener("resize", updatePostPreviews);
   $("viewport").addEventListener("scroll", () => {
     const view = $("viewport");
     if (busy || !autoLoadEnabled || elements.loadMore.hidden) return;

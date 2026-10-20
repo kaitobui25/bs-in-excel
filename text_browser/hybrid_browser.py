@@ -79,7 +79,8 @@ FACEBOOK_POSTS = r"""
       .replace(/[\u200b-\u200f\ufeff]/g, '')
       .split(/\n+/).map(line => line.trim())
       .filter(line => line && line !== 'Facebook' && !/^[\s$\/|·•]+$/.test(line))
-      .join('\n');
+      .join('\n')
+      .replace(/\s+(?:See less|Xem bớt|Thu gọn)\s*$/iu, '');
     const links = [];
     const seen = new Set();
     for (const a of el.querySelectorAll('a[href]')) {
@@ -254,14 +255,15 @@ return { ...meta, html, filteredAds, rejectedKeys: [...rejected],
     def _feed_page(self, notice: str = "") -> PageData:
         blocks = []
         links = []
-        for post in self._posts.values():
+        for key, post in self._posts.items():
             parts = [{"type": "text", "text": post["text"]}]
             for link in post["links"]:
                 if not link["url"].startswith(("https://", "http://")):
                     continue
                 parts.append({"type": "link", "text": link["title"], "url": link["url"]})
                 links.append(Link(link["title"], link["url"]))
-            blocks.append({"kind": "post", "author": post.get("author", ""), "parts": parts})
+            blocks.append({"kind": "post", "key": key,
+                           "author": post.get("author", ""), "parts": parts})
         text = "\n\n".join(post["text"] for post in self._posts.values())
         if not blocks:
             notice = ("Chưa lấy được bài viết từ Bảng tin. Hãy đăng nhập Facebook "
