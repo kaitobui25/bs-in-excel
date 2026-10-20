@@ -81,12 +81,51 @@ class NeoMcpTests(unittest.TestCase):
         ]
         page = NeoPage(client)
         self.assertEqual(page.run("return 'first';", url="https://example.com/"), "first")
-        with self.assertRaises(NeoMcpError):
-            page.run("return true;", url="https://example.com/second")
-        self.assertIsNone(page.page_id)
-        self.assertEqual(page.run("return 'fresh';", url="https://example.com/second"), "fresh")
+        self.assertEqual(page.run("return true;", url="https://example.com/second"), "fresh")
         self.assertEqual(page.page_id, 15)
         page.close()
+
+    def test_navigation_recovers_expired_session_once(self):
+        client = Mock(session_id="old")
+        def perform(script):
+            if client.run.call_count == 1:
+                client.session_id = None
+                raise NeoMcpError("404: Session not found")
+            if client.run.call_count == 2:
+                client.session_id = "new"
+                return 22
+            return {"pageId": 22, "data": "reconnected"}
+        client.run.side_effect = perform
+        page = NeoPage(client)
+        page.page_id = 12
+        self.assertEqual(page.run("return true;", url="https://facebook.com/"), "reconnected")
+        self.assertEqual(client.run.call_count, 3)
+        self.assertEqual(page.page_id, 22)
+
+    def test_non_navigation_does_not_retry_expired_session(self):
+        client = Mock(session_id="old")
+        client.run.side_effect = NeoMcpError("NEO_TAB_UNAVAILABLE")
+        page = NeoPage(client)
+        page.page_id = 8
+        with self.assertRaises(NeoMcpError):
+            page.run("return true;")
+        self.assertEqual(client.run.call_count, 1)
+        self.assertIsNone(page.page_id)
+
+    def test_open_retries_expired_session_without_existing_page(self):
+        client = Mock(session_id="old")
+        def perform(script):
+            if client.run.call_count == 1:
+                client.session_id = None
+                raise NeoMcpError("Session not found")
+            if client.run.call_count == 2:
+                client.session_id = "new"
+                return 33
+            return {"pageId": 33, "data": "ok"}
+        client.run.side_effect = perform
+        page = NeoPage(client)
+        self.assertEqual(page.run("return true;", url="https://facebook.com/"), "ok")
+        self.assertEqual(page.page_id, 33)
 
     def test_full_browser_back_without_history(self):
         with patch("text_browser.browser.NeoPage") as factory:

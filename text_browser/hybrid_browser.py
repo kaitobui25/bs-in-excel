@@ -7,9 +7,10 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from .browser import Link, PageData
+from .facebook_ads import is_ad_post
 from .html_content import extract_page
 from .http_browser import HttpTextBrowser
-from .neo_mcp import NeoPage
+from .neo_mcp import NeoMcpError, NeoPage
 
 
 def is_facebook_url(url: str) -> bool:
@@ -55,6 +56,14 @@ FACEBOOK_POSTS = r"""
     !candidates.some(other => other !== el && other.contains(el)));
   // Read the current end of the virtualized feed in bounded chunks.
   return candidates.slice(-12).map(el => {
+    const label = /^(?:sponsored|promoted|paidpartnership|đượctàitrợ|quảngcáo|đãtàitrợ|広告|スポンサー|gesponsert|sponsorisé|patrocinado)$/iu;
+    const message = el.querySelector('[data-ad-preview="message"]');
+    const sponsor = [...el.querySelectorAll('[aria-label], [title], a, span')].slice(0, 280)
+      .some(node => {
+        if (message && !(message.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)) return false;
+        const names = [node.getAttribute('aria-label'), node.getAttribute('title'), node.innerText];
+        return names.some(name => name && label.test(name.replace(/[\s\u200b-\u200f\ufeff]/g, '')));
+      }) || [...el.querySelectorAll('a[href]')].some(a => /facebook\.com\/(?:ads\/about|about\/ads)\b/i.test(a.href));
     const author = (el.querySelector('h3, h4')?.innerText || '').split('\n')[0].trim().slice(0, 120);
     const text = (el.innerText || '')
       .replace(/[\u200b-\u200f\ufeff]/g, '')
@@ -77,7 +86,8 @@ FACEBOOK_POSTS = r"""
     const feedId = el.closest('[data-pagelet*="FeedUnit"]')?.getAttribute('data-pagelet') ||
       el.getAttribute('data-id') || '';
     const lead = text.slice(0, 32).replace(/(?:See more|Xem thêm|もっと見る)$/i, '').trim();
-    return {key: permalink || `${feedId}:${author}:${lead}`, author, text: text.slice(0, __POST_LIMIT__), links};
+    return {key: permalink || `${feedId}:${author}:${lead}`, author,
+            text: text.slice(0, __POST_LIMIT__), links, sponsored: sponsor};
   }).filter(post => post.text.length >= 35);
 }
 """
@@ -107,18 +117,33 @@ class FacebookNeo:
     def __init__(self) -> None:
         self._page = NeoPage(block_media=True)
         self._posts: dict[str, dict] = {}
+        self._ads_filtered = 0
         self._url = ""
         self._title = "Facebook"
 
     def navigate(self, url: str) -> PageData:
-        self._posts.clear()
         is_feed = urlparse(url).path in {"", "/"}
         # Navigation can be slow on Facebook. Keep it separate from scrolling
         # so no single Neo run spends its entire 30s budget on both.
-        self._page.run("return true;", url=url)
-        info = self._gather_posts(5 if is_feed else 1, 6 if is_feed else 0)
+        for attempt in range(2):
+            self._posts.clear()
+            self._ads_filtered = 0
+            try:
+                self._page.run("return true;", url=url)
+                info = self._gather_posts(5 if is_feed else 1, 6 if is_feed else 0)
+                break
+            except NeoMcpError:
+                # The first navigate run may succeed but the MCP session can
+                # expire before the feed read. Retry only if the old tab was
+                # actually lost; a timeout or extraction error is not safe to
+                # replay automatically.
+                if attempt or self._page.page_id is not None:
+                    raise
         if self._posts:
             return self._feed_page()
+        if self._ads_filtered:
+            return PageData(title=self._title, url=self._url, text="", links=[], blocks=[],
+                            notice="Đã ẩn bài viết quảng cáo; chưa có bài thông thường để hiển thị.")
         soup = BeautifulSoup(info.get("html", ""), "lxml")
         text, links, blocks = extract_page(soup, self._url)
         return PageData(title=self._title, url=self._url, text=text, links=links,
@@ -145,12 +170,14 @@ class FacebookNeo:
         script = """
 const existing = new Set(__EXISTING__);
 const found = new Map();
+let filteredAds = 0;
 for (let index = 0; index <= __SCROLLS__; index++) {
   const expanded = (await page.evaluate(__EXPAND__)).value;
   if (expanded) await sleep(150);
   const posts = (await page.evaluate(__POSTS__, undefined, {maxChars: 200000})).value;
   if (!Array.isArray(posts)) throw new Error('NEO_FACEBOOK_RESULT_TOO_LARGE');
   for (const post of posts) {
+    if (post.sponsored) { filteredAds++; continue; }
     if (!post.key) continue;
     const old = found.get(post.key);
     if (!old || post.text.length > old.text.length) found.set(post.key, post);
@@ -169,7 +196,7 @@ const html = found.size ? '' : (await page.evaluate(() =>
   (document.querySelector('main, [role="main"]') || document.body)?.outerHTML.slice(0, 120000) || ''
 , undefined, {maxChars: 200000})).value;
 if (html === undefined) throw new Error('NEO_FACEBOOK_HTML_TOO_LARGE');
-return { ...meta, html, posts: [...found.values()].slice(0, __LIMIT__) };
+return { ...meta, html, filteredAds, posts: [...found.values()].slice(0, __LIMIT__) };
 """
         replacements = {
             "__EXISTING__": json.dumps(list(self._posts), ensure_ascii=False),
@@ -184,7 +211,11 @@ return { ...meta, html, posts: [...found.values()].slice(0, __LIMIT__) };
         info = self._page.run(script, url=url)
         self._url = info["url"]
         self._title = info["title"]
+        self._ads_filtered += info.get("filteredAds", 0)
         for post in info["posts"]:
+            if is_ad_post(post):
+                self._ads_filtered += 1
+                continue
             key = post.get("key")
             if not key or (key not in self._posts and len(self._posts) >= MAX_FEED_POSTS):
                 continue

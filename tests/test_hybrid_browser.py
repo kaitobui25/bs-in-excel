@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from text_browser.browser import PageData
 from text_browser.hybrid_browser import FacebookNeo, HybridTextBrowser, MAX_FEED_POSTS, MAX_POST_CHARS, is_facebook_url
+from text_browser.neo_mcp import NeoMcpError
 
 
 def post(key, text, author="Author"):
@@ -97,6 +98,59 @@ class HybridBrowserTests(unittest.TestCase):
             self.assertEqual(len(result.blocks), MAX_FEED_POSTS)
             self.assertFalse(result.has_more)
             self.assertEqual(len(result.blocks[0]["parts"][0]["text"]), MAX_POST_CHARS)
+            browser.close()
+
+    def test_sponsored_and_price_promotion_removed_from_feed(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                "html": "", "filteredAds": 1,
+                "posts": [post("s", "A long sponsored card body", "Business") | {"sponsored": True},
+                          post("ad2", "ĐĂNG KÍ WIFI - GIẢM CƯỚC 24 THÁNG 2000 yên/tháng"),
+                          post("friend", "Today I met some good friends and went hiking")],
+            }]
+            browser = FacebookNeo()
+            result = browser.navigate("https://www.facebook.com/Siemens/")
+            self.assertEqual(len(result.blocks), 1)
+            self.assertIn("hiking", result.text)
+            self.assertNotIn("WIFI", result.text)
+            browser.close()
+
+    def test_ad_only_feed_does_not_fall_back_to_unfiltered_html(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                "html": "<main>ĐĂNG KÍ WIFI - GIẢM CƯỚC 24 THÁNG</main>",
+                "filteredAds": 1, "posts": [],
+            }]
+            browser = FacebookNeo()
+            result = browser.navigate("https://www.facebook.com/Siemens/")
+            self.assertEqual(result.text, "")
+            self.assertEqual(result.blocks, [])
+            self.assertIn("quảng cáo", result.notice)
+            browser.close()
+
+    def test_navigate_retries_when_session_lost_during_feed_read(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 12
+            responses = iter([True, NeoMcpError("Session not found"), True,
+                {"title": "Facebook", "url": "https://www.facebook.com/Siemens/",
+                 "signIn": False, "html": "", "posts": [post("1", "A normal post with meaningful text about a regular activity")]}])
+            def call(*args, **kwargs):
+                value = next(responses)
+                if isinstance(value, Exception):
+                    page.page_id = None
+                    raise value
+                page.page_id = 13
+                return value
+            page.run.side_effect = call
+            browser = FacebookNeo()
+            result = browser.navigate("https://www.facebook.com/Siemens/")
+            self.assertIn("normal post", result.text)
+            self.assertEqual(page.run.call_count, 4)
             browser.close()
 
 

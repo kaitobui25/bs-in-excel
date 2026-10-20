@@ -129,30 +129,36 @@ try {
             raise NeoMcpError("BrowserOS Neo không cấp page id.")
         self.page_id = page_id
 
-    def run(self, body: str, *, url: str | None = None) -> object:
+    def run(self, body: str, *, url: str | None = None, _retry: bool = True) -> object:
         if self.client.session_id is None:
             # A terminated MCP session no longer owns the previous page.
             self.page_id = None
-        if self.page_id is None:
-            if url is None:
-                raise NeoMcpError("Chưa mở trang trên BrowserOS Neo.")
-            self._open()
-        prefix = f"""
+        try:
+            if self.page_id is None:
+                if url is None:
+                    raise NeoMcpError("Chưa mở trang trên BrowserOS Neo.")
+                self._open()
+            prefix = f"""
 const owned = (await browser.pages.list()).some(
   tab => tab.pageId === {self.page_id} && tab.ownership === 'mine'
 );
 if (!owned) throw new Error('NEO_TAB_UNAVAILABLE');
 const page = browser.page({self.page_id});
 """
-        operation = (f"await page.goto({json.dumps(url, ensure_ascii=False)});\n"
-                     if url is not None else "")
-        operation += f"const data = await (async () => {{\n{body}\n}})();\nreturn {{pageId: page.id, data}};"
-        script = f"{prefix}\n{operation}"
-        try:
+            operation = (f"await page.goto({json.dumps(url, ensure_ascii=False)});\n"
+                         if url is not None else "")
+            operation += f"const data = await (async () => {{\n{body}\n}})();\nreturn {{pageId: page.id, data}};"
+            script = f"{prefix}\n{operation}"
             output = self.client.run(script)
         except NeoMcpError as exc:
-            if self.client.session_id is None or "NEO_TAB_UNAVAILABLE" in str(exc):
+            lost_page = self.client.session_id is None or "NEO_TAB_UNAVAILABLE" in str(exc)
+            if lost_page:
                 self.page_id = None
+                # Opening a URL is repeatable. A lost MCP session cannot own
+                # the old tab, so create a new one on a fresh session once.
+                # Do not retry load_more/scroll or arbitrary page scripts.
+                if url is not None and _retry:
+                    return self.run(body, url=url, _retry=False)
             raise
         if not isinstance(output, dict) or not isinstance(output.get("pageId"), int):
             raise NeoMcpError("BrowserOS Neo trả về page id không hợp lệ.")

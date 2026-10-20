@@ -65,6 +65,12 @@ blocked on the add-in's Neo tab through page-scoped CDP where supported;
 some network media requests may still occur inside Neo. No media is shown in
 Excel. The reader caps a feed at 80 posts and 3,500 characters per post for
 responsiveness. The Neo `run` API has a 30-second limit per batch.
+The reader skips posts explicitly marked as sponsored (including Vietnamese,
+English and Japanese labels) and obvious price/discount/sign-up promotions.
+This is a best-effort content filter, not a guarantee that every promotional
+post will be recognized; it does not alter your Facebook or Neo settings.
+If Neo expires its MCP session, opening a URL automatically reconnects once
+in a new add-in-owned tab. Scrolling/loading more is not silently replayed.
 
 For other client-rendered sites, set `BS_EXCEL_BROWSER_MODE=neo` before starting
 the backend to use Neo on all sites. The old `cdp` mode name is accepted as an
