@@ -78,9 +78,18 @@ some network media requests may still occur inside Neo. No media is shown in
 Excel. The reader caps a feed at 80 posts and 3,500 characters per post for
 responsiveness. The Neo `run` API has a 30-second limit per batch.
 The reader skips posts explicitly marked as sponsored (including Vietnamese,
-English and Japanese labels) and obvious price/discount/sign-up promotions.
-This is a best-effort content filter, not a guarantee that every promotional
-post will be recognized; it does not alter your Facebook or Neo settings.
+English and Japanese labels) and unlabelled commercial promotions, identified
+using a combination of sales calls to action (inbox/order/contact), price,
+discounts, service/product descriptions, business-page names and shop links.
+The extractor also detects contact/purchase buttons on Facebook Page cards;
+the local filter recognizes enrollment promotions in Japanese, business/shop
+posts in Chinese, and brand-product descriptions without an explicit price.
+Rejected posts are excluded from feed pagination targets so scrolling can
+continue to the next regular post. The filter is local and rule-based;
+Facebook does not expose a stable advertising flag for all promotional posts,
+so some ads may still pass through and some borderline commercial posts may be
+hidden. Adjust the patterns in `text_browser/facebook_ads.py` as needed. The
+filter does not change Facebook or Neo account settings.
 If Neo expires its MCP session, opening a URL automatically reconnects once
 in a new add-in-owned tab. Scrolling/loading more is not silently replayed.
 

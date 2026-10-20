@@ -1,27 +1,42 @@
-"""Conservative, text-only filtering of Facebook sponsored feed cards.
+"""Filter paid and organic sales promotions from Facebook text posts.
 
-Facebook does not publish a stable feed DOM. Prefer explicit sponsorship
-metadata from the rendered page; use a narrow sales-copy fallback for ads
-whose label is not exposed in text. No remote ad-blocking service is used.
+Facebook's sponsored label is not reliably present on ordinary page posts.
+Use several independent *commercial intent* signals rather than requiring a
+specific keyword trio. No content is sent to an external classification API.
 """
 from __future__ import annotations
 
 import re
+from urllib.parse import parse_qs, urlparse
 
 
+_INVISIBLE = re.compile(r"[\u200b-\u200f\u2060\ufeff]")
 _LABEL = re.compile(
     r"^(?:sponsored|promoted|paid partnership|được tài trợ|quảng cáo|"
     r"đã tài trợ|広告|スポンサー|gesponsert|sponsorisé|patrocinado)$",
     re.IGNORECASE,
 )
-_ACTION = re.compile(
-    r"đăng\s*k[íý]|đặt hàng|mua ngay|liên hệ ngay|gọi ngay|"
-    r"order now|sign up|subscribe now|shop now|buy now|今すぐ申し込",
+_SOLICIT = re.compile(
+    r"(?<!\w)(?:inbox|ib|dm|send message|message us|shop now|buy now|order now|"
+    r"contact us)(?!\w)|"
+    r"nhắn\s*tin|gửi\s*tin\s*nhắn|liên\s*hệ\s*(?:ngay|để|với|bên)|"
+    r"đăng\s*k[íý]\s*(?:ngay|hôm nay|wifi|sim)|mua\s*ngay|"
+    r"chốt\s*(?:đơn|nhanh)|lên\s*đơn|"
+    r"đặt\s*(?:vé|hàng|lịch)\s*(?:ngay|tại|qua|để)|hỗ\s*trợ\s*đặt\s*vé|"
+    r"gọi\s*ngay|nhận\s*báo\s*giá|tư\s*vấn\s*(?:miễn\s*phí|ngay)|"
+    r"đặt\s*mua|お申し込み|お申込み|お問い合わせ|資料請求|無料相談|"
+    r"今すぐ|受講生募集|目指しませんか|申し込み受付|ご連絡ください",
     re.IGNORECASE,
 )
 _OFFER = re.compile(
-    r"giảm\s*(?:giá|cước|phí|\d+\s*%)|ưu đãi|khuyến m[ạã]i|"
-    r"không cần đặt cọc|discount|limited offer|promotion|\d+\s*%\s*off|割引",
+    r"giảm\s*(?:ngay\s*)?(?:\d{1,3}\s*%|giá|cước|phí)|"
+    r"ưu\s*đãi|khuyến\s*m[ạã]i|miễn\s*phí|tặng\s*(?:phí|thêm|ngay)|"
+    r"không\s*(?:cần\s*)?(?:đặt\s*cọc|cọc|phí)|"
+    r"(?<!\w)(?:combo|deal|sale|discount|limited offer|promotion|free trial|"
+    r"special offer|\d{1,3}\s*%\s*off)(?!\w)|"
+    r"chỉ\s*từ|giá\s*sốc|cực\s*sốc|siêu\s*tiết\s*kiệm|"
+    r"dùng\s*thử\s*miễn\s*phí|割引|無料|キャンペーン|期間限定|特典|格安|"
+    r"フリートライアル|お試し|返金保証",
     re.IGNORECASE,
 )
 _PRICE = re.compile(
@@ -29,17 +44,129 @@ _PRICE = re.compile(
     r"[¥$₫]\s*\d[\d.,]*|\d[\d.,]*\s*/\s*(?:tháng|month))",
     re.IGNORECASE,
 )
+_PRODUCT_OR_SERVICE = re.compile(
+    r"(?<!\w)(?:sim|esim|wi-?fi|pocket wifi|tour|booking|flight|hotel|"
+    r"data\s*(?:plan|sim)|visa)(?!\w)|"
+    r"vé\s*(?:máy\s*bay|khứ\s*hồi|tết)|phòng\s*vé|"
+    r"gói\s*(?:cước|mạng|dịch\s*vụ)|dịch\s*vụ|khách\s*sạn|"
+    r"cước\s*(?:mạng|tháng)|giao\s*hàng|mỹ\s*phẩm|bảo\s*hiểm|"
+    r"通販|留学|資格|コース|スクール|ビザ|保育|プログラム|"
+    r"チャイルドケア|受講|certificate\s*[ivx]+|"
+    r"潛水|潜水|浮潛|浮潜|ダイビング|スキューバ|教練|"
+    r"移動通信|通信サービス|電信服務|電訊服務|"
+    r"手機套餐|課程|招生|培訓|證照|"
+    r"nha\s*khoa|răng\s*sứ|niềng\s*răng|thẩm\s*mỹ|"
+    r"マットレス|寝具|ベッド|睡眠|歯科|美容",
+    re.IGNORECASE,
+)
+_BUSINESS_AUTHOR = re.compile(
+    r"phòng\s*vé|công\s*ty|dịch\s*vụ|cửa\s*hàng|trung\s*tâm|"
+    r"học\s*viện|cửa\s*tiệm|nha\s*khoa|phòng\s*khám|thẩm\s*mỹ|"
+    r"(?<!\w)(?:shop|store|agency|travel|tours|wifi|sim|airlines|"
+    r"ltd|company|co\.,?\s*ltd|academy|school|training)(?!\w)|"
+    r"株式会社|有限会社|公式ショップ|専門店|專門店|专门店|"
+    r"旅行社|有限公司|學院|学院|補習班|培訓中心|"
+    r"潛水|潜水|浮潛|浮潜|ダイビング",
+    re.IGNORECASE,
+)
+_BUSINESS_PITCH = re.compile(
+    r"chuyên\s*(?:cung\s*cấp|kinh\s*doanh|phân\s*phối|phục\s*vụ)|"
+    r"chúng\s*tôi\s*(?:luôn\s*)?(?:sẵn\s*sàng\s*)?hỗ\s*trợ|"
+    r"(?:toàn\s*bộ|tất\s*cả)\s*các\s*gói\s*dịch\s*vụ|"
+    r"(?:提供|販売|販売中|受付中|開講中|受講生募集|受講者募集|"
+    r"コース開始|資格取得|目指しましょう|招生中|開始招生|"
+    r"課程招生|專業服務|專業教學|我們提供|"
+    r"追求した|こだわった|体験してみてください|お試しください)",
+    re.IGNORECASE,
+)
+_COURSE_RECRUITMENT = re.compile(
+    r"(?:受講生|受講者|入学生|研修生)\s*募集(?:中)?|"
+    r"(?:Certificate\s*[ivx]+|資格|保育士|留学|保育)\s*(?:受講|取得|コース|募集)|"
+    r"(?:保育士|資格|スキル)\s*を?目指す|"
+    r"(?:入学|受講|講座|コース)\s*(?:申込|申し込み|受付)|"
+    r"(?:招生|報名|課程)\s*(?:開始|進行|招生中)",
+    re.IGNORECASE,
+)
+_URGENCY = re.compile(
+    r"số\s*lượng\s*có\s*hạn|chốt\s*nhanh|nhanh\s*tay|"
+    r"không\s*bỏ\s*lỡ|trong\s*ngày\s*hôm\s*nay|"
+    r"(?<!\w)(?:hurry|limited time|today only)(?!\w)|お早めに",
+    re.IGNORECASE,
+)
+_MESSAGE_BUTTON = re.compile(
+    r"^(?:messenger|send message|shop now|buy now|contact us|"
+    r"gửi tin nhắn|nhắn tin|mua ngay|liên hệ|chat trên messenger|"
+    r"メッセージを送信|傳送訊息|發送訊息)$",
+    re.IGNORECASE,
+)
+_EXTERNAL_WEBSITE = re.compile(
+    r"(?<![\w@])(?:(?:https?://)?www\.|https?://)?"
+    r"(?:[a-z0-9-]+\.)+(?:com|net|org|jp|au|vn|life|edu|co\.jp)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_external_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.hostname in {"l.facebook.com", "lm.facebook.com"}:
+        # Facebook routes external links via l.facebook.com/l.php?u=...
+        url = parse_qs(parsed.query).get("u", [url])[0]
+    hostname = (urlparse(url).hostname or "").lower()
+    return bool(hostname and not any(
+        hostname == host or hostname.endswith("." + host)
+        for host in ("facebook.com", "fb.com", "fb.watch")
+    ))
 
 
 def is_ad_post(post: dict) -> bool:
-    """Exclude labelled ads and clear price+discount+sign-up promotions.
+    """Detect clearly promotional posts; retain personal shopping discussions.
 
-    Checking all three promotion signals avoids blocking everyday discussion
-    of shopping, prices, or advertisements.
+    A direct purchase/contact solicitation alone is not enough. Require
+    supporting commercial evidence (service, price, business page or external
+    store), so a friend's recipe, price comparison or scam warning is kept.
     """
     if post.get("sponsored") is True:
         return True
-    text = post.get("text", "")
+    text = _INVISIBLE.sub("", post.get("text", ""))
     if any(_LABEL.fullmatch(line.strip()) for line in text.splitlines()[:6]):
         return True
-    return bool(_ACTION.search(text) and _OFFER.search(text) and _PRICE.search(text))
+
+    author = _INVISIBLE.sub("", post.get("author", ""))
+    links = post.get("links") or []
+    solicitation = bool(_SOLICIT.search(text))
+    offer = bool(_OFFER.search(text))
+    price = bool(_PRICE.search(text))
+    product = bool(_PRODUCT_OR_SERVICE.search(text))
+    business = bool(_BUSINESS_AUTHOR.search(author))
+    business_pitch = bool(_BUSINESS_PITCH.search(text))
+    course_recruitment = bool(_COURSE_RECRUITMENT.search(text))
+    urgency = bool(_URGENCY.search(text))
+    external = any(_is_external_url(link.get("url", "")) for link in links) or any(
+        _is_external_url(match.group(0) if match.group(0).lower().startswith("http")
+                         else "https://" + match.group(0))
+        for match in _EXTERNAL_WEBSITE.finditer(text)
+    )
+    message_button = post.get("pageCta") is True or any(
+        _MESSAGE_BUTTON.fullmatch(link.get("title", "").strip()) for link in links
+    )
+
+    # Brand/shop posts can promote their services through storytelling rather
+    # than prices or direct calls to action. A named specialist business whose
+    # post concerns its own service is still commercial feed content.
+    if business and (product or business_pitch or message_button):
+        return True
+    if course_recruitment and (product or business or business_pitch):
+        return True
+    if business_pitch and product and (message_button or external or business or offer):
+        return True
+
+    score = (3 * solicitation + 2 * offer + 2 * price + product
+             + business + urgency + external + message_button + business_pitch)
+    commercial_context = product or price or business or external
+    # A direct solicitation pointing to an outside merchant can be an ad even
+    # without a listed cash price or discount (common for course/travel posts).
+    if solicitation and product and external and score >= 5:
+        return True
+    return bool(score >= 6 and commercial_context and (
+        solicitation or (offer and (price or business or external))
+    ))

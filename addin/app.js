@@ -46,6 +46,15 @@
   async function request(action, value = "") {
     if (busy) return;
     setBusy(true);
+    // A full-page navigation can take time on Facebook. Clear previously
+    // loaded (possibly unfiltered) posts rather than show them below Loading.
+    // "more" intentionally keeps the current posts while fetching the rest.
+    if (["navigate", "reload", "search"].includes(action)) {
+      autoLoadEnabled = false;
+      elements.content.replaceChildren();
+      elements.links.replaceChildren();
+      showOnly();
+    }
     setStatus(action === "history" ? "Đang mở lịch sử…" : "Đang tải…");
     try {
       const response = await fetch("/api/browse", {

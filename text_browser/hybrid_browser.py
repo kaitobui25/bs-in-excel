@@ -65,6 +65,12 @@ FACEBOOK_POSTS = r"""
         const names = [node.getAttribute('aria-label'), node.getAttribute('title'), node.innerText];
         return names.some(name => name && label.test(name.replace(/[\s\u200b-\u200f\ufeff]/g, '')));
       }) || [...el.querySelectorAll('a[href]')].some(a => /facebook\.com\/(?:ads\/about|about\/ads)\b/i.test(a.href));
+    // Sales CTAs are attached to Facebook Page cards, not necessarily to a
+    // clickable <a> link; pass their presence to the local text classifier.
+    const pageCta = [...el.querySelectorAll('button, [role="button"], a')].some(node => {
+      const label = (node.getAttribute('aria-label') || node.innerText || '').trim();
+      return /^(?:send message|contact us|shop now|buy now|visit website|book now|call now|gửi tin nhắn|nhắn tin|liên hệ|mua ngay|メッセージを送信|傳送訊息|發送訊息)$/iu.test(label);
+    });
     const author = (el.querySelector('h3, h4')?.innerText || '').split('\n')[0].trim().slice(0, 120);
     const text = (el.innerText || '')
       .replace(/[\u200b-\u200f\ufeff]/g, '')
@@ -88,7 +94,7 @@ FACEBOOK_POSTS = r"""
       el.getAttribute('data-id') || '';
     const lead = text.slice(0, 32).replace(/(?:See more|Xem thêm|もっと見る)$/i, '').trim();
     return {key: permalink || `${feedId}:${author}:${lead}`, author,
-            text: text.slice(0, __POST_LIMIT__), links, sponsored: sponsor};
+            text: text.slice(0, __POST_LIMIT__), links, sponsored: sponsor, pageCta};
   }).filter(post => post.text.length >= 35);
 }
 """
@@ -120,6 +126,7 @@ class FacebookNeo:
                              tab_store=LOCAL_DATA / "neo-facebook-tab.json",
                              reuse_hosts=("facebook.com", "fb.com", "fb.watch"))
         self._posts: dict[str, dict] = {}
+        self._rejected_keys: set[str] = set()
         self._ads_filtered = 0
         self._url = ""
         self._title = "Facebook"
@@ -130,6 +137,7 @@ class FacebookNeo:
         # so no single Neo run spends its entire 30s budget on both.
         for attempt in range(2):
             self._posts.clear()
+            self._rejected_keys.clear()
             self._ads_filtered = 0
             try:
                 self._page.run("return true;", url=url)
@@ -172,6 +180,7 @@ class FacebookNeo:
         # limit applies; stop as soon as enough new posts have been found.
         script = """
 const existing = new Set(__EXISTING__);
+const rejected = new Set(__REJECTED__);
 const found = new Map();
 let filteredAds = 0;
 for (let index = 0; index <= __SCROLLS__; index++) {
@@ -180,8 +189,8 @@ for (let index = 0; index <= __SCROLLS__; index++) {
   const posts = (await page.evaluate(__POSTS__, undefined, {maxChars: 200000})).value;
   if (!Array.isArray(posts)) throw new Error('NEO_FACEBOOK_RESULT_TOO_LARGE');
   for (const post of posts) {
-    if (post.sponsored) { filteredAds++; continue; }
-    if (!post.key) continue;
+    if (!post.key || rejected.has(post.key)) continue;
+    if (post.sponsored) { rejected.add(post.key); filteredAds++; continue; }
     const old = found.get(post.key);
     if (!old || post.text.length > old.text.length) found.set(post.key, post);
   }
@@ -195,14 +204,16 @@ const meta = (await page.evaluate(() => ({
   url: location.href,
   signIn: !!document.querySelector('input[type="password"]')
 }))).value;
-const html = found.size ? '' : (await page.evaluate(() =>
+const html = (found.size || rejected.size) ? '' : (await page.evaluate(() =>
   (document.querySelector('main, [role="main"]') || document.body)?.outerHTML.slice(0, 120000) || ''
 , undefined, {maxChars: 200000})).value;
 if (html === undefined) throw new Error('NEO_FACEBOOK_HTML_TOO_LARGE');
-return { ...meta, html, filteredAds, posts: [...found.values()].slice(0, __LIMIT__) };
+return { ...meta, html, filteredAds, rejectedKeys: [...rejected],
+         posts: [...found.values()].slice(0, __LIMIT__) };
 """
         replacements = {
             "__EXISTING__": json.dumps(list(self._posts), ensure_ascii=False),
+            "__REJECTED__": json.dumps(list(self._rejected_keys), ensure_ascii=False),
             "__SCROLLS__": str(scrolls),
             "__EXPAND__": FACEBOOK_EXPAND,
             "__POSTS__": FACEBOOK_POSTS.replace("__POST_LIMIT__", str(MAX_POST_CHARS)),
@@ -215,9 +226,15 @@ return { ...meta, html, filteredAds, posts: [...found.values()].slice(0, __LIMIT
         self._url = info["url"]
         self._title = info["title"]
         self._ads_filtered += info.get("filteredAds", 0)
+        self._rejected_keys.update(info.get("rejectedKeys", []))
         for post in info["posts"]:
             if is_ad_post(post):
-                self._ads_filtered += 1
+                key = post.get("key")
+                if key not in self._rejected_keys:
+                    self._ads_filtered += 1
+                if key:
+                    self._rejected_keys.add(key)
+                    self._posts.pop(key, None)
                 continue
             key = post.get("key")
             if not key or (key not in self._posts and len(self._posts) >= MAX_FEED_POSTS):
@@ -258,6 +275,7 @@ return { ...meta, html, filteredAds, posts: [...found.values()].slice(0, __LIMIT
     def close(self) -> None:
         self._page.close()
         self._posts.clear()
+        self._rejected_keys.clear()
 
 
 class HybridTextBrowser(HttpTextBrowser):

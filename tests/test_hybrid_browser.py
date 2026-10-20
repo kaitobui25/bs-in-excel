@@ -153,6 +153,70 @@ class HybridBrowserTests(unittest.TestCase):
             self.assertEqual(page.run.call_count, 4)
             browser.close()
 
+    def test_promotional_posts_do_not_count_as_requested_feed_posts(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            ads = [post(f"ad{i}",
+                    "SIM WIFI COMBO giảm cước 30% - nhắn tin ngay nhận giá ¥2000/tháng")
+                   for i in range(5)]
+            ordinary = [post(f"person{i}",
+                        f"A normal personal journal entry about a beautiful hiking trip number {i}")
+                        for i in range(5)]
+            page.run.side_effect = [True,
+                {"title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                 "html": "", "posts": ads},
+                {"title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                 "html": "", "posts": ordinary},
+            ]
+            browser = FacebookNeo()
+            data = browser.navigate("https://www.facebook.com/")
+            self.assertEqual(len(data.blocks), 5)
+            self.assertNotIn("SIM WIFI COMBO", data.text)
+            self.assertEqual(len(browser._rejected_keys), 5)
+            script = page.run.call_args_list[2].args[0]
+            for key in ("ad0", "ad1", "ad2", "ad3", "ad4"):
+                self.assertIn(f'"{key}"', script)
+            browser.close()
+
+    def test_expanded_post_becoming_an_ad_is_removed(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 10
+            page.run.side_effect = [True,
+                {"title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                 "html": "", "posts": [post("same", "A short article about SIM usage tips in Japan")]
+                },
+                {"title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                 "html": "", "posts": [post("same", "SIM WIFI COMBO giảm 30% - inbox đặt hàng ngay ¥2000/tháng")]
+                },
+            ]
+            browser = FacebookNeo()
+            browser.navigate("https://www.facebook.com/Siemens/")
+            self.assertEqual(len(browser._posts), 1)
+            browser._collect_feed(min_posts=1, scrolls=0)
+            self.assertEqual(browser._feed_page().blocks, [])
+            self.assertIn("same", browser._rejected_keys)
+            browser.close()
+
+    def test_business_page_cta_and_unlabelled_courses_are_removed(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 8
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/",
+                "signIn": False, "html": "", "posts": [
+                    post("mtrend", "Chuyên cung cấp các dịch vụ di động cho người nước ngoài tại Nhật Bản.", "Mtrend") | {"pageCta": True},
+                    post("global", "チャイルドケア Certificate III 受講生募集中 オーストラリアで保育士を目指す", "Global Bridge Japan"),
+                    post("diver", "我們認為僅憑這些條件很難判斷一位潛水教練的實力。", "黒潮潛水in沖縄 中文專門店"),
+                    post("friend", "Today I shared photos and recipes with family and friends"),
+                ],
+            }]
+            browser = FacebookNeo()
+            result = browser.navigate("https://www.facebook.com/Siemens/")
+            self.assertEqual([p["author"] for p in result.blocks], ["Author"])
+            self.assertEqual(browser._rejected_keys, {"mtrend", "global", "diver"})
+            browser.close()
+
 
 if __name__ == "__main__":
     unittest.main()
