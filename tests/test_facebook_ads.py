@@ -4,6 +4,71 @@ from text_browser.facebook_ads import is_ad_post
 
 
 class FacebookAdsTests(unittest.TestCase):
+    def test_chatgpt_japanese_free_trial_campaign(self):
+        ad = {
+            "author": "ChatGPT",
+            "text": ("ChatGPT 画像で、自分をかわいいスタンプにしよう\n"
+                     "1. クリックする\n2. 写真をアップロードする\n3. 友達に送る\n"
+                     "CHATGPT.COM\nChatGPT 画像を無料で試そう"),
+            "links": [{"title": "ChatGPT 画像を無料で試そう",
+                       "url": "https://chatgpt.com/"}],
+        }
+        self.assertTrue(is_ad_post(ad))
+        self.assertTrue(is_ad_post({**ad, "links": []}))
+
+    def test_stylized_unicode_wifi_sales_campaign(self):
+        ad = {
+            "author": "Internet JAPAN - Giá Rẻ Mạng Khỏe",
+            "text": ("𝑾𝑰𝑭𝑰 𝙘𝙤̂́ đ𝙞̣𝙣𝙝 𝙘𝙝𝙞̉ 1800 /𝙩𝙝𝙖́𝙣𝙜.\n"
+                     "𝐓𝐨̂́𝐜 đ𝐨̣̂ 𝐟𝐮𝐥𝐥 𝐝𝐮𝐧𝐠 𝐥𝐮̛𝐨̛̣𝐧𝐠 5G\n"
+                     "𝑴𝒊𝒆̂̃𝒏 𝒑𝒉𝒊́ 𝒍𝒂̆́𝒑 đ𝒂̣̆𝒕!\n"
+                     "𝗟𝗶𝗲̂𝗻 𝗵𝗲̣̂ 𝘁𝗿𝘂̛̣𝗰 𝘁𝗶𝗲̂́𝗽 𝗙𝗮𝗻𝗽𝗮𝗴𝗲 đ𝗲̂̉ đ𝘂̛𝗼̛̣𝗰 𝘁𝘂̛ 𝘃𝗮̂́𝗻\n"
+                     "𝗧𝗵𝗼̛̀𝗶 𝗴𝗶𝗮𝗻 𝗹𝗮̆́𝗽 đ𝗮̣̆𝘁 𝘁𝘂̛̀ 𝟮-𝟯 𝘁𝘂𝗮̂̀𝗻( 𝗶𝗯 𝗹𝗮̀ 𝗰𝗼́ 𝗪𝗜𝗙𝗜 )"),
+            "pageCta": True,
+        }
+        self.assertTrue(is_ad_post(ad))
+        self.assertTrue(is_ad_post({**ad, "pageCta": False}))
+
+    def test_vat_vo_studio_branded_giveaway(self):
+        self.assertTrue(is_ad_post({
+            "author": "Vật Vờ Studio",
+            "text": ("THỬ THÁCH: TINH MẮT TÌM MÁY, MAY MẮN RINH QUÀ\n"
+                     "Khởi động Workshop Galaxy S26 FE - Mission Possible\n"
+                     "THỂ LỆ THAM GIA CỰC DỄ:\n"
+                     "Follow fanpage Vật Vờ Studio, Like và Share bài viết này về trang cá nhân "
+                     "ở chế độ công khai kèm hashtag #thegioididong #Samsung #GalaxyS26FE.\n"
+                     "Comment theo cú pháp: [Số chiếc Galaxy S26 FE] + [tag 2 người bạn]\n"
+                     "PHẦN THƯỞNG:\nSamsung Galaxy Watch Fit3 dành cho người trả lời đúng nhất"),
+        }))
+
+    def test_property_listing_and_plugin_download_pitch_from_feed(self):
+        self.assertTrue(is_ad_post({
+            "author": "Trần Hoàng Thi Thiên",
+            "text": ("Ra lô đất 574m2 thuộc khu phố Văn Hải, Phường Long Thành\n"
+                     "Diện tích: 10 x 50, có 130m2 thổ cư\n"
+                     "8 tỷ xxx (bớt chút cho khách)\n"
+                     "Call: 0933.652.653 (Thiên để chốt)"),
+        }))
+        self.assertTrue(is_ad_post({
+            "author": "Đạt Houzz",
+            "text": ("Xưa bạn phải học rồi hì hục cả ngày mà chả ra gì "
+                     "thì nay plugin này sẽ biến công việc đó như chơi game! "
+                     "link tải plugin bình luận"),
+        }))
+
+    def test_brands_and_discussion_of_promotions_are_not_enough(self):
+        for author, text in (
+            ("ChatGPT", "Hôm nay nhóm chúng tôi thảo luận về an toàn AI và bảo mật thông tin."),
+            ("Bạn học", "Mình dùng ChatGPT để soạn tài liệu, rất tiện."),
+            ("Vật Vờ Studio", "Video đánh giá camera Galaxy, mình thích độ chi tiết."),
+            ("Lan", "Tôi thấy mấy giveaway bắt follow và share rất phiền, nên cảnh giác."),
+            ("Minh", "Tôi vừa mua WiFi và kể trải nghiệm dùng mạng ở Nhật Bản."),
+            ("Hương", "Mình đang tìm link tải plugin của người bạn giới thiệu, ai biết chỉ giúp nhé."),
+            ("Bình", "Tin tức thị trường: bán đất cần lưu ý giấy tờ và thuế, giá có thể hơn 8 tỷ."),
+        ):
+            with self.subTest(author=author, text=text):
+                self.assertFalse(is_ad_post({"author": author, "text": text}))
+
     def test_sponsored_metadata_multilingual(self):
         for text in ("Sponsored", "Được tài trợ", "Quảng cáo", "広告"):
             with self.subTest(text=text):

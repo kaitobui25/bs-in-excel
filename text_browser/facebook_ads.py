@@ -7,6 +7,7 @@ specific keyword trio. No content is sent to an external classification API.
 from __future__ import annotations
 
 import re
+import unicodedata
 from urllib.parse import parse_qs, urlparse
 
 
@@ -104,6 +105,43 @@ _EXTERNAL_WEBSITE = re.compile(
     r"(?:[a-z0-9-]+\.)+(?:com|net|org|jp|au|vn|life|edu|co\.jp)\b",
     re.IGNORECASE,
 )
+_TRIAL_CTA = re.compile(
+    r"無料で?(?:試そう|試して|試す|体験|始めよう)|"
+    r"(?:試そう|試して|体験).{0,15}無料|"
+    r"try\s*(?:it\s*)?(?:for\s*)?free|start\s*(?:a\s*)?free\s*trial|"
+    r"dùng\s*thử\s*miễn\s*phí",
+    re.IGNORECASE,
+)
+_GIVEAWAY = re.compile(
+    r"giveaway|give\s*away|(?:rinh|nhận|trúng)\s*quà|"
+    r"phần\s*thưởng|giải\s*thưởng|quà\s*tặng|プレゼント企画",
+    re.IGNORECASE,
+)
+_ENGAGEMENT = re.compile(
+    r"(?<!\w)(?:follow|like|share|comment|tag)(?!\w)|"
+    r"theo\s*dõi\s*fanpage|chia\s*sẻ\s*công\s*khai|gắn\s*thẻ",
+    re.IGNORECASE,
+)
+_CAMPAIGN = re.compile(
+    r"workshop|fanpage|hashtag|thể\s*lệ|khởi\s*động|"
+    r"thử\s*thách|ra\s*mắt|sự\s*kiện|launch",
+    re.IGNORECASE,
+)
+_PROPERTY_LISTING = re.compile(
+    r"(?<!\w)(?:ra|bán|cần\s*bán)\s+(?:lô\s*)?(?:đất|nhà|căn\s*hộ)\b",
+    re.IGNORECASE,
+)
+_CONTACT_PHONE = re.compile(r"\bcall\s*:\s*\+?\d|(?<!\d)(?:\d[\s.-]*){9,11}(?!\d)", re.IGNORECASE)
+_DOWNLOAD_PROMO = re.compile(
+    r"link\s*tải\s*(?:plugin|công\s*cụ|tool|app)\s*"
+    r"(?:(?:ở|trong)\s*)?(?:bình\s*luận|comment|cmt)",
+    re.IGNORECASE,
+)
+
+
+def _normalize(text: str) -> str:
+    """Reveal stylized Unicode sales text for classification, not display."""
+    return unicodedata.normalize("NFKC", _INVISIBLE.sub("", text))
 
 
 def _is_external_url(url: str) -> bool:
@@ -127,11 +165,11 @@ def is_ad_post(post: dict) -> bool:
     """
     if post.get("sponsored") is True:
         return True
-    text = _INVISIBLE.sub("", post.get("text", ""))
+    text = _normalize(post.get("text", ""))
     if any(_LABEL.fullmatch(line.strip()) for line in text.splitlines()[:6]):
         return True
 
-    author = _INVISIBLE.sub("", post.get("author", ""))
+    author = _normalize(post.get("author", ""))
     links = post.get("links") or []
     solicitation = bool(_SOLICIT.search(text))
     offer = bool(_OFFER.search(text))
@@ -147,8 +185,19 @@ def is_ad_post(post: dict) -> bool:
         for match in _EXTERNAL_WEBSITE.finditer(text)
     )
     message_button = post.get("pageCta") is True or any(
-        _MESSAGE_BUTTON.fullmatch(link.get("title", "").strip()) for link in links
+        _MESSAGE_BUTTON.fullmatch(_normalize(link.get("title", "")).strip()) for link in links
     )
+
+    # Branded free trials and follow/share prize campaigns often have neither
+    # a cash price nor a direct "buy" button (e.g. JP app ads, tech giveaways).
+    if _TRIAL_CTA.search(text) and (external or business or product):
+        return True
+    if _GIVEAWAY.search(text) and _ENGAGEMENT.search(text) and _CAMPAIGN.search(text):
+        return True
+    if _PROPERTY_LISTING.search(text) and _CONTACT_PHONE.search(text):
+        return True
+    if _DOWNLOAD_PROMO.search(text):
+        return True
 
     # Brand/shop posts can promote their services through storytelling rather
     # than prices or direct calls to action. A named specialist business whose

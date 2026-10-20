@@ -93,6 +93,11 @@ discounts, service/product descriptions, business-page names and shop links.
 The extractor also detects contact/purchase buttons on Facebook Page cards;
 the local filter recognizes enrollment promotions in Japanese, business/shop
 posts in Chinese, and brand-product descriptions without an explicit price.
+It normalizes styled Unicode only for classification, so stylized WiFi sales
+text is detected without altering the displayed post. It also recognizes
+branded free-trial calls to action, promotional follow/share giveaways,
+property listings with phone contacts, and plugin-download pitches. A brand
+name alone is not enough to hide a post.
 Rejected posts are excluded from feed pagination targets so scrolling can
 continue to the next regular post. The filter is local and rule-based;
 Facebook does not expose a stable advertising flag for all promotional posts,
