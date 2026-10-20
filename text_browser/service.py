@@ -1,7 +1,7 @@
 """HTTPS loopback service for the Excel Content Add-in.
 
-The HTTPServer thread owns the synchronous Playwright connection. A browser
-tab is created lazily on the first navigation and reused. Nothing is written
+The HTTPServer thread owns the synchronous Neo MCP client. A browser
+tab is created lazily on the first Neo navigation and reused. Nothing is written
 directly into Excel.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from .browser import Link, PageData
 from .http_browser import HttpTextBrowser
 from .hybrid_browser import HybridTextBrowser
-from .config import LOCAL_DATA, MAX_LINKS
+from .config import LOCAL_DATA, MAX_LINKS, MAX_TEXT
 from .history import HistoryStore
 
 LOG = logging.getLogger(__name__)
@@ -28,16 +28,15 @@ BASE_URL = f"https://localhost:{PORT}"
 WEB_ROOT = Path(__file__).resolve().parent.parent / "addin"
 CERT_ROOT = Path.home() / ".office-addin-dev-certs"
 MAX_REQUEST_SIZE = 8 * 1024
-MAX_TEXT = 45_000
 
 
 class BrowserService:
     def __init__(self, browser=None, history: HistoryStore | None = None):
         if browser is not None:
             self.browser = browser
-        elif os.environ.get("BS_EXCEL_BROWSER_MODE", "http").lower() == "cdp":
-            from .browser import ChromeTextBrowser
-            self.browser = ChromeTextBrowser()
+        elif os.environ.get("BS_EXCEL_BROWSER_MODE", "http").lower() in {"neo", "cdp"}:
+            from .browser import NeoTextBrowser
+            self.browser = NeoTextBrowser()
         else:
             self.browser = HybridTextBrowser()
         self.history = history or HistoryStore(LOCAL_DATA / "history.json")
@@ -48,7 +47,7 @@ class BrowserService:
     def open(self, action: str, value: str = "") -> dict:
         if action == "history":
             return {"ok": True, "history": [asdict(e) for e in self.history.entries], "page": None}
-        if action not in {"navigate", "search", "back", "forward", "reload"}:
+        if action not in {"navigate", "search", "back", "forward", "reload", "more"}:
             return {"ok": False, "error": "Lệnh không hỗ trợ."}
         if action == "navigate":
             url = value.strip()
@@ -64,6 +63,10 @@ class BrowserService:
             operation = self.browser.back
         elif action == "forward":
             operation = self.browser.forward
+        elif action == "more":
+            if not hasattr(self.browser, "load_more"):
+                return {"ok": False, "error": "Trang này không hỗ trợ tải thêm."}
+            operation = self.browser.load_more
         else:
             operation = self.browser.reload
         if not self.connected:
@@ -82,6 +85,7 @@ class BrowserService:
             "links": [asdict(link) for link in self.links],
             "blocks": page.blocks,
             "notice": page.notice,
+            "has_more": page.has_more,
         }}
 
     def close(self) -> None:

@@ -2,7 +2,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from text_browser.browser import read_cdp_endpoint
 from text_browser.history import HistoryStore
 from text_browser.navigation import google_search_url
 
@@ -27,14 +26,6 @@ class HistoryTests(unittest.TestCase):
             path = Path(d) / "history.json"
             path.write_text("bad json", encoding="utf-8")
             self.assertEqual(HistoryStore(path).entries, [])
-
-
-class CdpTests(unittest.TestCase):
-    def test_cdp_endpoint_file(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "DevToolsActivePort"
-            path.write_text("53859\n/devtools/browser/test-id\n", encoding="utf-8")
-            self.assertEqual(read_cdp_endpoint(path), "ws://127.0.0.1:53859/devtools/browser/test-id")
 
 
 if __name__ == "__main__":

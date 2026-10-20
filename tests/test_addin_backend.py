@@ -32,6 +32,12 @@ class DummyBrowser:
     def reload(self):
         return PageData("Reload", "https://example.com", "reloaded", [])
 
+    def load_more(self):
+        self.commands.append(("more", ""))
+        return PageData("Facebook", "https://www.facebook.com/", "Two posts", [],
+                        blocks=[{"kind": "post", "parts": [{"type": "text", "text": "Two posts"}]}],
+                        has_more=True)
+
     def close(self):
         pass
 
@@ -71,6 +77,13 @@ class AddinBackendTests(unittest.TestCase):
     def test_unsupported_and_empty_search(self):
         self.assertFalse(self.service.open("unknown")["ok"])
         self.assertFalse(self.service.open("search", " ")["ok"])
+
+    def test_load_more_passes_feed_blocks_to_excel(self):
+        response = self.service.open("more")
+        self.assertTrue(response["ok"])
+        self.assertTrue(response["page"]["has_more"])
+        self.assertEqual(response["page"]["blocks"][0]["kind"], "post")
+        self.assertEqual(self.browser.commands, [("more", "")])
 
 
 if __name__ == "__main__":

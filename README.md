@@ -25,6 +25,8 @@ To reconfigure installation, run `Install Text Browser.cmd` once.
 - URL: `https://www.siemens.com/ja-jp/products/tia-portal/`
 - Facebook: `https://www.facebook.com/` or public pages such as
   `https://www.facebook.com/Siemens/`
+- Facebook home feed: posts appear as separate text cards; scroll to the bottom
+  or select **Tải thêm bài viết** to fetch later posts without losing those loaded.
 - Search phrase: `siemens tia portal`
 - Click a result or one of the Back / Forward / Reload / History buttons.
 
@@ -40,33 +42,41 @@ Filtered image positions display small empty picture outlines, not image data.
 
     Excel Content Add-in (addin/index.html, app.js, style.css)
         -> HTTPS localhost API (text_browser/service.py)
-        -> HTML requests + parser (text_browser/http_browser.py)
+        -> HTTP + HTML parser for ordinary sites (text_browser/http_browser.py)
+        -> BrowserOS Neo MCP for Facebook (text_browser/neo_mcp.py)
         -> plain text and clickable links
 
 HTTP is the fast default for normal sites. Facebook rejects plain HTTP
-requests, so Facebook URLs automatically **connect to Chrome Profile 3**
-using its already-enabled Remote Debugging endpoint. The add-in creates one
-dedicated Chrome tab and reuses it for Facebook links and Back/Forward.
-It never navigates or closes existing tabs. The existing signed-in session
-is used directly, without copying cookies, credentials, or profile files.
-Image/video/font requests are blocked only in the dedicated tab. Excel shows
-plain text, clickable links and empty image placeholders.
+requests, so opening Facebook connects to **BrowserOS Neo** through its local
+MCP endpoint `http://127.0.0.1:9010/mcp`. **Start BrowserOS Neo before using
+Facebook in Excel.** The backend lazily creates one Neo background tab and
+reuses it. It never navigates or closes your existing Neo tabs or personal
+Google Chrome tabs. The Neo session/profile owns its own login state; no
+cookies, tokens, or profile files are copied from other browsers.
 
-Chrome must be running with Profile 3 and Remote Debugging enabled at
-chrome://inspect/#remote-debugging. Approve only your trusted local tools.
-Facebook access remains limited by your account permissions; there is no
-CAPTCHA or authentication bypass.
+**First-time Facebook setup:** sign in to Facebook in the BrowserOS Neo app
+once, then open/reload Facebook in the Excel add-in. The login is kept by
+BrowserOS Neo, subject to Facebook's login policy. Facebook access remains
+limited by account permissions; CAPTCHA/authentication are not bypassed.
 
-If you need other client-rendered sites and approve Chrome Remote Debugging,
-set environment variable `BS_EXCEL_BROWSER_MODE=cdp` before starting the
-backend. That optional mode uses Playwright and Chrome Profile 3 and can be
-limited by browser consent/permissions. No login or cookies are copied by
-the default mode.
+Facebook uses its rendered DOM to collect posts in short batches, then sends
+only text, links, and image placeholders to Excel. Common video file URLs are
+blocked on the add-in's Neo tab through page-scoped CDP where supported;
+some network media requests may still occur inside Neo. No media is shown in
+Excel. The reader caps a feed at 80 posts and 3,500 characters per post for
+responsiveness. The Neo `run` API has a 30-second limit per batch.
+
+For other client-rendered sites, set `BS_EXCEL_BROWSER_MODE=neo` before starting
+the backend to use Neo on all sites. The old `cdp` mode name is accepted as an
+alias for compatibility. The MCP URL can be configured via
+`BS_EXCEL_NEO_MCP_URL` if necessary; keep the service restricted to a trusted
+local environment.
 
 History and runtime logs are local under `%LOCALAPPDATA%\bs-in-excel\`.
 The HTTPS server binds to `127.0.0.1:3010`; website text is rendered via
-DOM textContent rather than inserting remote HTML. Only Facebook uses
-personal Chrome Profile 3, through a separately owned tab.
+DOM textContent rather than inserting remote HTML. The Python backend talks
+to Neo directly over HTTP JSON-RPC with a reused MCP session; no Playwright,
+Chrome remote-debugging setup, or PowerShell/curl browser calls are required.
 
 The Office localhost certificate was observed to expire on **2026-11-04**.
 Renew the Office development certificate before that date if using the add-in

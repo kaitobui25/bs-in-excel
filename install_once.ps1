@@ -6,7 +6,7 @@ $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
 if (-not (Test-Path -LiteralPath $pythonw)) {
     throw 'Python Windows launcher (pythonw.exe) not found next to python.exe.'
 }
-& $python -c 'import playwright.sync_api, requests, bs4, lxml'
+& $python -c 'import requests, bs4, lxml'
 if ($LASTEXITCODE -ne 0) {
     & $python -m pip install -r (Join-Path $root 'requirements.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Python dependencies installation failed.' }

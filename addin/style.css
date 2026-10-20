@@ -38,6 +38,11 @@ h2 { font-size: 16px; margin: 20px 0 10px; }
 #content .block-item { padding-left: 15px; position: relative; }
 #content .block-item::before { content: "•"; position: absolute; left: 1px; color: var(--muted); }
 #content .block-caption { display: block; font-size: 12px; color: var(--muted); }
+#content .block-post { max-width: 780px; margin: 0 0 16px; padding: 15px 18px; border: 1px solid var(--line); border-radius: 9px; background: #fff; white-space: normal; }
+.post-author { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+.post-body { white-space: pre-wrap; line-height: 1.7; }
+.post-links { display: flex; flex-wrap: wrap; gap: 8px 14px; padding-top: 11px; margin-top: 11px; border-top: 1px solid var(--line); font-size: 12px; }
+#load-more { display: block; margin: 4px auto 28px; padding: 10px 20px; color: var(--accent); border-color: var(--accent); font-weight: 600; }
 #content a.text-link + a.text-link { margin-left: 0.4em; }
 #content .anchor-target { display: block; height: 0; }
 .image-placeholder { display: inline-flex; width: 68px; height: 44px; border: 1px dashed #a6b2c1; border-radius: 4px; background: #f2f5f8; vertical-align: middle; margin: 3px 6px 3px 0; align-items: center; justify-content: center; cursor: default; }

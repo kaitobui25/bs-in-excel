@@ -6,15 +6,17 @@
     back: $("back"), forward: $("forward"), reload: $("reload"),
     history: $("history"), status: $("status"),
     welcome: $("welcome"), title: $("title"), url: $("page-url"),
-    notice: $("page-notice"), content: $("content"), links: $("links"), historyList: $("history-list")
+    notice: $("page-notice"), content: $("content"), loadMore: $("load-more"),
+    links: $("links"), historyList: $("history-list")
   };
   let busy = false;
+  let autoLoadEnabled = false;
 
   const setStatus = message => { elements.status.textContent = message; };
   const showOnly = (...visible) => {
     for (const element of [
       elements.welcome, elements.title, elements.url, elements.notice,
-      elements.content, elements.links, elements.historyList
+      elements.content, elements.loadMore, elements.links, elements.historyList
     ]) element.hidden = !visible.includes(element);
   };
   const make = (tag, text, className = "") => {
@@ -25,7 +27,7 @@
   };
   const setBusy = active => {
     busy = active;
-    for (const button of [elements.go, elements.back, elements.forward, elements.reload, elements.history]) {
+    for (const button of [elements.go, elements.back, elements.forward, elements.reload, elements.history, elements.loadMore]) {
       button.disabled = active;
     }
     elements.address.disabled = active;
@@ -54,7 +56,7 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "HTTP " + response.status);
       if (data.history) showHistory(data.history);
-      else if (data.page) showPage(data.page);
+      else if (data.page) showPage(data.page, action === "more");
     } catch (error) {
       setStatus("Lỗi: " + error.message);
     } finally {
@@ -100,15 +102,31 @@
       }
       const kind = Object.prototype.hasOwnProperty.call(tagNames, block.kind)
         ? block.kind : "paragraph";
-      const element = document.createElement(tagNames[kind]);
-      element.className = "read-block block-" + kind;
-      for (const part of (block.parts || [])) element.append(renderPart(part));
+      const isPost = block.kind === "post";
+      const element = document.createElement(isPost ? "section" : tagNames[kind]);
+      element.className = "read-block block-" + (isPost ? "post" : kind);
+      if (isPost) {
+        const author = block.author || "";
+        const header = make("div", author || "Bài viết " + (fragment.querySelectorAll(".block-post").length + 1), "post-author");
+        const body = make("div", "", "post-body");
+        const actions = make("div", "", "post-links");
+        for (const part of (block.parts || [])) {
+          const content = part.type === "text" && author && part.text.startsWith(author + "\n")
+            ? { ...part, text: part.text.slice(author.length + 1) } : part;
+          (part.type === "link" ? actions : body).append(renderPart(content));
+        }
+        element.append(header, body);
+        if (actions.childNodes.length) element.append(actions);
+      } else {
+        for (const part of (block.parts || [])) element.append(renderPart(part));
+      }
       fragment.append(element);
     }
     elements.content.replaceChildren(fragment);
   }
 
-  function showPage(page) {
+  function showPage(page, keepPosition = false) {
+    const oldScroll = $("viewport").scrollTop;
     elements.title.textContent = page.title || "Không có tiêu đề";
     elements.url.textContent = page.url;
     elements.notice.textContent = page.notice || "";
@@ -128,10 +146,15 @@
       elements.links.append(list);
     }
     showOnly(elements.title, elements.url, elements.content,
+      ...(page.has_more ? [elements.loadMore] : []),
       ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
-    setStatus("Đã tải · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự · " + page.links.length + " liên kết");
-    $("viewport").scrollTop = 0;
-    if (hasBlocks && page.url.includes("#")) {
+    const postCount = hasBlocks ? page.blocks.filter(block => block.kind === "post").length : 0;
+    autoLoadEnabled = postCount > 0 && Boolean(page.has_more) && !page.notice;
+    setStatus(postCount
+      ? "Đã tải " + postCount + " bài viết · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự"
+      : "Đã tải · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự · " + page.links.length + " liên kết");
+    $("viewport").scrollTop = keepPosition ? oldScroll : 0;
+    if (!keepPosition && hasBlocks && page.url.includes("#")) {
       const fragmentId = decodeURIComponent(page.url.split("#")[1] || "");
       const target = document.getElementById(fragmentId);
       if (target) target.scrollIntoView({ block: "start" });
@@ -139,6 +162,7 @@
   }
 
   function showHistory(entries) {
+    autoLoadEnabled = false;
     elements.historyList.replaceChildren(make("h2", "Lịch sử (" + entries.length + ")"));
     if (!entries.length) elements.historyList.append(make("p", "Chưa có lịch sử."));
     const list = document.createElement("ol");
@@ -164,10 +188,19 @@
     event.preventDefault();
     request("navigate", link.href);
   });
+  $("viewport").addEventListener("scroll", () => {
+    const view = $("viewport");
+    if (busy || !autoLoadEnabled || elements.loadMore.hidden) return;
+    if (view.scrollHeight - view.scrollTop - view.clientHeight < 260) {
+      autoLoadEnabled = false;
+      request("more");
+    }
+  });
   elements.back.addEventListener("click", () => request("back"));
   elements.forward.addEventListener("click", () => request("forward"));
   elements.reload.addEventListener("click", () => request("reload"));
   elements.history.addEventListener("click", () => request("history"));
+  elements.loadMore.addEventListener("click", () => request("more"));
   $("sample-siemens").addEventListener("click", () => request("navigate",
     "https://www.siemens.com/ja-jp/products/tia-portal/"));
   $("sample-facebook").addEventListener("click", () => request("navigate", "https://www.facebook.com/"));

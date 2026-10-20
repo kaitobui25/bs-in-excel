@@ -2,21 +2,21 @@ import unittest
 from unittest.mock import Mock, patch
 
 from text_browser.browser import PageData
-from text_browser.hybrid_browser import FacebookChrome, HybridTextBrowser, is_facebook_url
+from text_browser.hybrid_browser import FacebookNeo, HybridTextBrowser, MAX_FEED_POSTS, MAX_POST_CHARS, is_facebook_url
+
+
+def post(key, text, author="Author"):
+    return {"key": key, "text": text, "author": author,
+            "links": [{"title": "Read", "url": "https://www.facebook.com/posts/1"}]}
 
 
 class HybridBrowserTests(unittest.TestCase):
     def test_facebook_hosts_only(self):
-        for url in (
-            "https://facebook.com/", "https://www.facebook.com/Siemens/",
-            "https://m.facebook.com/", "https://l.facebook.com/l.php?u=a",
-            "https://fb.watch/test", "https://fb.com/",
-        ):
+        for url in ("https://facebook.com/", "https://www.facebook.com/Siemens/",
+                    "https://m.facebook.com/", "https://fb.watch/test", "https://fb.com/"):
             self.assertTrue(is_facebook_url(url), url)
-        for url in (
-            "https://notfacebook.com/", "https://facebook.com.example.org/",
-            "https://www.siemens.com/", "https://facebook.com.attacker.example/",
-        ):
+        for url in ("https://notfacebook.com/", "https://facebook.com.example.org/",
+                    "https://www.siemens.com/", "https://facebook.com.attacker.example/"):
             self.assertFalse(is_facebook_url(url), url)
 
     def test_facebook_is_lazy_and_reused(self):
@@ -24,11 +24,10 @@ class HybridBrowserTests(unittest.TestCase):
         fake = Mock()
         fake.navigate.side_effect = lambda url: PageData("Facebook", url, "public text", [])
         try:
-            with patch("text_browser.hybrid_browser.FacebookChrome", return_value=fake) as factory, \
+            with patch("text_browser.hybrid_browser.FacebookNeo", return_value=fake) as factory, \
                  patch("text_browser.http_browser.HttpTextBrowser._fetch", autospec=True,
                        side_effect=lambda _self, url: PageData("Other", url, "normal HTML", [])):
-                first = browser.navigate("https://www.siemens.com/")
-                self.assertEqual(first.title, "Other")
+                self.assertEqual(browser.navigate("https://www.siemens.com/").title, "Other")
                 factory.assert_not_called()
                 browser.navigate("https://www.facebook.com/")
                 browser.navigate("https://www.facebook.com/Siemens/")
@@ -40,42 +39,65 @@ class HybridBrowserTests(unittest.TestCase):
             browser.close()
         fake.close.assert_called_once()
 
-    def test_profile_three_attached_without_launching_new_chrome(self):
-        page = Mock()
-        page.is_closed.return_value = False
-        page.url = "https://www.facebook.com/Siemens/"
-        page.title.return_value = "Siemens | Facebook"
-        page.content.return_value = (
-            "<html><body><main><h1>Siemens</h1>"
-            "<a href='/about'>About</a></main></body></html>"
-        )
-        context = Mock()
-        context.new_page.return_value = page
-        browser = Mock()
-        browser.contexts = [context]
-        runtime = Mock()
-        runtime.chromium.connect_over_cdp.return_value = browser
-        manager = Mock()
-        manager.start.return_value = runtime
+    def test_feed_batches_are_combined_in_one_mcp_call(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 8
+            page.run.side_effect = [True,
+                {"title": "Facebook", "url": "https://www.facebook.com/", "posts": [
+                    post("a", "First post with a meaningful body"),
+                    post("b", "Another post with meaningful text"),
+                    post("c", "A third post of adequate length"),
+                    post("d", "A fourth post of adequate length"),
+                    post("e", "A fifth post of adequate length")], "html": "", "signIn": False},
+                {"title": "Facebook", "url": "https://www.facebook.com/", "posts": [
+                    post("a", "First post with a meaningful body now expanded"),
+                    post("f", "Sixth post with meaningful information"),
+                    post("g", "Seventh post with meaningful information"),
+                    post("h", "Eighth post with meaningful information"),
+                    post("i", "Ninth post with meaningful information")], "html": "", "signIn": False},
+            ]
+            browser = FacebookNeo()
+            first = browser.navigate("https://www.facebook.com/")
+            self.assertEqual(len(first.blocks), 5)
+            self.assertTrue(first.has_more)
+            later = browser.load_more()
+            self.assertEqual(len(later.blocks), 9)
+            self.assertIn("expanded", later.text)
+            self.assertEqual(page.run.call_count, 3)
+            self.assertIn("await sleep(700)", page.run.call_args_list[1].args[0])
+            self.assertIn("new Set([\"a\", \"b\", \"c\", \"d\", \"e\"])", page.run.call_args_list[2].args[0])
+            browser.close()
+            page.close.assert_called_once()
 
-        with patch("text_browser.hybrid_browser.sync_playwright", return_value=manager), \
-             patch("text_browser.hybrid_browser.read_cdp_endpoint",
-                   return_value="ws://127.0.0.1:53859/devtools/browser/test"):
-            client = FacebookChrome()
-            result = client.navigate("https://www.facebook.com/Siemens/")
-            self.assertEqual(result.title, "Siemens | Facebook")
-            self.assertEqual(len(result.links), 1)
-            runtime.chromium.connect_over_cdp.assert_called_once()
-            runtime.chromium.launch_persistent_context.assert_not_called()
-            context.new_page.assert_called_once()
-            page.route.assert_called_once()
-            client.close()
+    def test_login_wall_and_public_page_fallback(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/",
+                "posts": [], "signIn": True,
+                "html": "<main><p>Please log in</p><a href='/help'>Help</a></main>",
+            }]
+            browser = FacebookNeo()
+            result = browser.navigate("https://www.facebook.com/")
+            self.assertIn("BrowserOS Neo", result.notice)
+            self.assertIn("Please log in", result.text)
+            self.assertEqual(result.links[0].url, "https://www.facebook.com/help")
+            browser.close()
 
-        # Closing the add-in's tab does NOT close Profile 3's context/window.
-        page.close.assert_called_once()
-        context.close.assert_not_called()
-        browser.close.assert_called_once()
-        runtime.stop.assert_called_once()
+    def test_feed_caps_total_posts_and_post_size(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                "html": "", "posts": [post(str(i), "X" * (MAX_POST_CHARS + 400)) for i in range(90)],
+            }]
+            browser = FacebookNeo()
+            result = browser.navigate("https://www.facebook.com/")
+            self.assertEqual(len(result.blocks), MAX_FEED_POSTS)
+            self.assertFalse(result.has_more)
+            self.assertEqual(len(result.blocks[0]["parts"][0]["text"]), MAX_POST_CHARS)
+            browser.close()
 
 
 if __name__ == "__main__":
