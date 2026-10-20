@@ -12,6 +12,8 @@
   };
   let busy = false;
   let autoLoadEnabled = false;
+  let requestVersion = 0;
+  let activeRequest = null;
   const expandedPosts = new Set();
 
   const setStatus = message => { elements.status.textContent = message; };
@@ -34,10 +36,8 @@
   };
   const setBusy = active => {
     busy = active;
-    for (const button of [elements.go, elements.back, elements.forward, elements.reload, elements.history, elements.loadMore]) {
-      button.disabled = active;
-    }
-    elements.address.disabled = active;
+    // Navigation is always available: a new action supersedes the old job.
+    elements.loadMore.disabled = active;
   };
 
   const parseAddress = input => {
@@ -51,36 +51,76 @@
   };
 
   async function request(action, value = "") {
-    if (busy) return;
+    if (action === "more" && busy) return;
+    const version = ++requestVersion;
+    if (activeRequest) activeRequest.abort();
+    const controller = new AbortController();
+    activeRequest = controller;
     // Avoid pinning the auto-hidden toolbar open after keyboard navigation.
     if (elements.toolbar.contains(document.activeElement)) document.activeElement.blur();
     setBusy(true);
-    elements.notice.hidden = true;
+    elements.notice.textContent = action === "more" ? "Đang tải thêm bài viết…" : "Đang tải trang…";
+    elements.notice.hidden = false;
     // A full-page navigation can take time on Facebook. Clear previously
     // loaded (possibly unfiltered) posts rather than show them below Loading.
     // "more" intentionally keeps the current posts while fetching the rest.
-    if (["navigate", "reload", "search"].includes(action)) {
+    if (action !== "more") {
       autoLoadEnabled = false;
+      expandedPosts.clear();
       elements.content.replaceChildren();
       elements.links.replaceChildren();
-      showOnly();
+      showOnly(elements.notice);
     }
     setStatus(action === "history" ? "Đang mở lịch sử…" : "Đang tải…");
+    let rendered = false;
+    let lastPage = null;
     try {
-      const response = await fetch("/api/browse", {
+      const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, value })
+        body: JSON.stringify({ action, value }),
+        signal: controller.signal
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "HTTP " + response.status);
-      if (action !== "more") expandedPosts.clear();
-      if (data.history) showHistory(data.history);
-      else if (data.page) showPage(data.page, action === "more");
+      let cursor = 0;
+      while (version === requestVersion) {
+        const poll = await fetch(`/api/jobs/${data.job_id}?since=${cursor}`, {
+          cache: "no-store", signal: controller.signal
+        });
+        const update = await poll.json();
+        if (!poll.ok || !update.ok) throw new Error(update.error || "HTTP " + poll.status);
+        if (version !== requestVersion) return;
+        cursor = update.version;
+        if (update.result) {
+          if (update.result.history) showHistory(update.result.history);
+          else if (update.result.page) {
+            lastPage = update.result.page;
+            showPage(lastPage, action === "more" || rendered);
+            rendered = true;
+          }
+        }
+        if (update.status === "partial") {
+          elements.notice.textContent = "Đang tải tiếp nội dung…";
+          elements.notice.hidden = false;
+        }
+        if (update.status === "complete") break;
+        if (update.status === "error") throw new Error(update.error || "Không thể tải trang.");
+        if (update.status === "cancelled") break;
+        await new Promise(resolve => setTimeout(resolve, 260));
+      }
     } catch (error) {
-      showError("Lỗi: " + error.message);
+      if (version === requestVersion && error.name !== "AbortError") {
+        showError("Lỗi: " + error.message);
+      }
     } finally {
-      setBusy(false);
+      if (version === requestVersion) {
+        setBusy(false);
+        autoLoadEnabled = Boolean(lastPage && lastPage.has_more &&
+          lastPage.blocks?.some(block => block.kind === "post") && !lastPage.notice &&
+          elements.notice.hidden);
+        activeRequest = null;
+      }
     }
   }
 
@@ -193,7 +233,7 @@
       ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
     if (hasBlocks) updatePostPreviews();
     const postCount = hasBlocks ? page.blocks.filter(block => block.kind === "post").length : 0;
-    autoLoadEnabled = postCount > 0 && Boolean(page.has_more) && !page.notice;
+    autoLoadEnabled = !busy && postCount > 0 && Boolean(page.has_more) && !page.notice;
     setStatus(postCount
       ? "Đã tải " + postCount + " bài viết · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự"
       : "Đã tải · " + (page.text || "").length.toLocaleString("vi-VN") + " ký tự · " + page.links.length + " liên kết");

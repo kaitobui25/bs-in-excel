@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -138,7 +139,7 @@ class FacebookNeo:
         self._url = ""
         self._title = "Facebook"
 
-    def navigate(self, url: str) -> PageData:
+    def navigate(self, url: str, on_progress: Callable[[PageData], None] | None = None) -> PageData:
         is_feed = urlparse(url).path in {"", "/"}
         # Navigation can be slow on Facebook. Keep it separate from scrolling
         # so no single Neo run spends its entire 30s budget on both.
@@ -148,7 +149,8 @@ class FacebookNeo:
             self._ads_filtered = 0
             try:
                 self._page.run("return true;", url=url)
-                info = self._gather_posts(5 if is_feed else 1, 6 if is_feed else 0)
+                info = self._gather_posts(5 if is_feed else 1, 6 if is_feed else 0,
+                                          on_progress=on_progress)
                 break
             except NeoMcpError:
                 # The first navigate run may succeed but the MCP session can
@@ -170,14 +172,24 @@ class FacebookNeo:
                             "Bạn vẫn có thể mở các trang công khai bằng URL."
                             if info.get("signIn") else ""))
 
-    def _gather_posts(self, new_posts: int, scrolls: int) -> dict:
+    def _gather_posts(self, new_posts: int, scrolls: int,
+                      on_progress: Callable[[PageData], None] | None = None) -> dict:
         # Each bounded run scrolls at most twice. Stop when the goal is met,
         # at the login wall, or after the requested scroll budget.
         remaining = scrolls
         before = len(self._posts)
+        previous = tuple((key, hash(post["text"])) for key, post in self._posts.items())
+        first = True
         while True:
-            chunk = min(remaining, 2)
+            # First read without scrolling: emit available posts before doing
+            # the slower multi-scroll feed scan.
+            chunk = 0 if first and on_progress else min(remaining, 2)
+            first = False
             info = self._collect_feed(max(1, new_posts - (len(self._posts) - before)), chunk)
+            snapshot = tuple((key, hash(post["text"])) for key, post in self._posts.items())
+            if on_progress and snapshot and snapshot != previous:
+                on_progress(self._feed_page())
+            previous = snapshot
             if len(self._posts) - before >= new_posts or info.get("signIn") or remaining <= chunk:
                 return info
             remaining -= chunk
@@ -272,11 +284,12 @@ return { ...meta, html, filteredAds, rejectedKeys: [...rejected],
                         text=text, links=links, blocks=blocks, notice=notice,
                         has_more=bool(blocks) and len(blocks) < MAX_FEED_POSTS)
 
-    def load_more(self) -> PageData:
+    def load_more(self, on_progress: Callable[[PageData], None] | None = None) -> PageData:
         if self._page.page_id is None or not self._posts:
             raise ValueError("Chưa có Bảng tin Facebook để tải thêm.")
         before = len(self._posts)
-        self._gather_posts(new_posts=min(4, MAX_FEED_POSTS - before), scrolls=6)
+        self._gather_posts(new_posts=min(4, MAX_FEED_POSTS - before), scrolls=6,
+                           on_progress=on_progress)
         note = "Không tìm thấy bài mới. Hãy thử tải lại Bảng tin." if len(self._posts) == before else ""
         return self._feed_page(notice=note)
 

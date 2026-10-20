@@ -53,10 +53,30 @@ Page content headings and Facebook post authors remain visible.
 ## Architecture
 
     Excel Content Add-in (addin/index.html, app.js, style.css)
-        -> HTTPS localhost API (text_browser/service.py)
-        -> HTTP + HTML parser for ordinary sites (text_browser/http_browser.py)
-        -> BrowserOS Neo MCP for Facebook (text_browser/neo_mcp.py)
-        -> plain text and clickable links
+        -> HTTPS localhost jobs API (text_browser/service.py, jobs.py)
+           -> independent HTTP + HTML streaming for ordinary sites
+           -> serialized BrowserOS Neo MCP for Facebook
+        -> progressive text and clickable links
+
+**Navigation responsiveness:** `POST /api/jobs` responds immediately with a
+random `job_id`. Excel polls `GET /api/jobs/<job_id>?since=<version>` every
+260 ms while the task is active. Responses move through `pending`, `partial`
+and `complete` (or `error`). The API stores only the latest page snapshot per
+job, not an ever-growing stream. On slow, large HTTP pages, an initial text
+snapshot is available after enough HTML arrives; small pages usually finish
+before a partial snapshot is worthwhile. Facebook publishes already-filtered
+posts from the first feed read before continuing its background scan.
+
+The localhost server accepts concurrent requests. Independent HTTP fetches do
+not wait for a slow Neo command. Neo operations targeting the same background
+tab remain serialized; this protects the browser session but means a new Neo
+operation can still wait for the old command's timeout. A newer navigation
+supersedes the previous task, preventing stale results from overwriting the
+current view or browser history. In-progress HTTP downloads stop at the next
+chunk after cancellation; an already-running Neo command cannot be forcibly
+aborted. Back, Forward, Reload, History and Facebook load-more are supported.
+The original synchronous `/api/browse` route remains for compatibility.
+The backend logs time to first content and completion in `addin.log`.
 
 HTTP is the fast default for normal sites. Facebook rejects plain HTTP
 requests, so opening Facebook connects to **BrowserOS Neo** through its local

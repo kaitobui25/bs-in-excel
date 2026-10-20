@@ -73,6 +73,33 @@ class HybridBrowserTests(unittest.TestCase):
             browser.close()
             page.close.assert_called_once()
 
+    def test_progressive_facebook_feed_filters_ads_before_first_preview(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 8
+            page.run.side_effect = [True,
+                {"title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                 "html": "", "posts": [
+                    post("ad", "A sponsored promotion advertising discounts", "Shop") | {"sponsored": True},
+                    post("a", "A non-commercial post about hiking with friends")],
+                },
+                {"title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                 "html": "", "posts": [
+                    post(key, f"A personal journal about family and travel, part {key}")
+                    for key in "bcde"],
+                },
+            ]
+            browser = FacebookNeo()
+            snapshots = []
+            try:
+                final = browser.navigate("https://www.facebook.com/", on_progress=snapshots.append)
+                self.assertEqual([block["key"] for block in snapshots[0].blocks], ["a"])
+                self.assertEqual([block["key"] for block in final.blocks], list("abcde"))
+                self.assertNotIn("sponsored", final.text.lower())
+                self.assertEqual(len(page.run.call_args_list), 3)
+            finally:
+                browser.close()
+
     def test_login_wall_and_public_page_fallback(self):
         with patch("text_browser.hybrid_browser.NeoPage") as factory:
             page = factory.return_value

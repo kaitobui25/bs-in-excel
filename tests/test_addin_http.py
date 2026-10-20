@@ -74,7 +74,8 @@ class HTTPTests(unittest.TestCase):
         script, css = script.decode("utf-8"), css.decode("utf-8")
         self.assertIn('make("button", expanded ? "See less" : "See more"', script)
         self.assertIn('window.addEventListener("resize", updatePostPreviews)', script)
-        self.assertIn('if (action !== "more") expandedPosts.clear()', script)
+        self.assertIn('expandedPosts.clear()', script)
+        self.assertIn('fetch("/api/jobs"', script)
         self.assertIn('-webkit-line-clamp: 4', css)
         self.assertIn('.block-post.post-collapsed .post-links', css)
 

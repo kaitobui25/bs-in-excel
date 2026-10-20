@@ -9,14 +9,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import ssl
+import threading
+from contextlib import nullcontext
 from dataclasses import asdict
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .browser import Link, PageData
-from .http_browser import HttpTextBrowser
 from .hybrid_browser import HybridTextBrowser
 from .config import LOCAL_DATA, MAX_LINKS, MAX_TEXT
 from .history import HistoryStore
@@ -44,6 +46,36 @@ class BrowserService:
         self.links: list[Link] = []
         self.current: PageData | None = None
         self.connected = False
+        self.lock = threading.RLock()
+
+    @staticmethod
+    def validate(action: str, value: str = "") -> str:
+        if action not in {"navigate", "search", "back", "forward", "reload", "more", "history"}:
+            return "Lệnh không hỗ trợ."
+        if action == "navigate":
+            parsed = urlparse(value.strip())
+            if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
+                return "Địa chỉ phải bắt đầu bằng http:// hoặc https://"
+        if action == "search" and not value.strip():
+            return "Nhập từ khóa tìm kiếm."
+        return ""
+
+    def publish_page(self, page: PageData, *, record_history: bool = True) -> dict:
+        """One trusted serializer for synchronous and progressive responses."""
+        old_url = self.current.url if self.current else None
+        self.current = page
+        self.links = page.links[:MAX_LINKS]
+        if record_history or old_url != page.url:
+            self.history.add(page.url, page.title)
+        return {"ok": True, "page": {
+            "title": visible_title(page.url, page.title),
+            "url": page.url,
+            "text": page.text[:MAX_TEXT],
+            "links": [asdict(link) for link in self.links],
+            "blocks": page.blocks,
+            "notice": page.notice,
+            "has_more": page.has_more,
+        }}
 
     def open(self, action: str, value: str = "") -> dict:
         if action == "history":
@@ -51,13 +83,11 @@ class BrowserService:
                 {**asdict(e), "title": visible_title(e.url, e.title)}
                 for e in self.history.entries
             ], "page": None}
-        if action not in {"navigate", "search", "back", "forward", "reload", "more"}:
-            return {"ok": False, "error": "Lệnh không hỗ trợ."}
+        invalid = self.validate(action, value)
+        if invalid:
+            return {"ok": False, "error": invalid}
         if action == "navigate":
             url = value.strip()
-            parsed = urlparse(url)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
-                return {"ok": False, "error": "Địa chỉ phải bắt đầu bằng http:// hoặc https://"}
             operation = lambda: self.browser.navigate(url)
         elif action == "search":
             if not value.strip():
@@ -79,18 +109,7 @@ class BrowserService:
         page = operation()
         if page is None:
             return {"ok": False, "error": "Không có trang trước / sau."}
-        self.current = page
-        self.links = page.links[:MAX_LINKS]
-        self.history.add(page.url, page.title)
-        return {"ok": True, "page": {
-            "title": visible_title(page.url, page.title),
-            "url": page.url,
-            "text": page.text[:MAX_TEXT],
-            "links": [asdict(link) for link in self.links],
-            "blocks": page.blocks,
-            "notice": page.notice,
-            "has_more": page.has_more,
-        }}
+        return self.publish_page(page)
 
     def close(self) -> None:
         if self.connected:
@@ -100,6 +119,7 @@ class BrowserService:
 
 class AddinHandler(BaseHTTPRequestHandler):
     service: BrowserService
+    jobs = None  # Set by run(); legacy HTTP tests can use the handler alone.
 
     def log_message(self, fmt: str, *args: object) -> None:
         LOG.info("%s %s", self.address_string(), fmt % args)
@@ -126,7 +146,23 @@ class AddinHandler(BaseHTTPRequestHandler):
         if not self._trusted_host():
             self._json(403, {"ok": False, "error": "Invalid host"})
             return
+        if self.headers.get("Origin") not in (None, BASE_URL):
+            self._json(403, {"ok": False, "error": "Invalid origin"})
+            return
         path = self.path.split("?", 1)[0]
+        if path.startswith("/api/jobs/"):
+            job_id = path.removeprefix("/api/jobs/")
+            if (self.jobs is None or not re.fullmatch(r"[0-9a-f]{32}", job_id)):
+                self._json(404, {"ok": False, "error": "Unknown job"})
+                return
+            try:
+                since = max(0, int(parse_qs(urlparse(self.path).query).get("since", ["0"])[0]))
+            except ValueError:
+                self._json(400, {"ok": False, "error": "Invalid version"})
+                return
+            snapshot = self.jobs.snapshot(job_id, since)
+            self._json(200 if snapshot else 404, snapshot or {"ok": False, "error": "Unknown job"})
+            return
         if path == "/api/health":
             self._json(200, {"ok": True, "connected": self.service.connected})
             return
@@ -150,7 +186,7 @@ class AddinHandler(BaseHTTPRequestHandler):
         if not self._trusted_host() or self.headers.get("Origin") != BASE_URL:
             self._json(403, {"ok": False, "error": "Invalid origin"})
             return
-        if self.path != "/api/browse" or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+        if self.path not in {"/api/browse", "/api/jobs"} or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             self._json(404, {"ok": False, "error": "Endpoint not found"})
             return
         try:
@@ -162,8 +198,17 @@ class AddinHandler(BaseHTTPRequestHandler):
             return
         try:
             request = json.loads(self.rfile.read(size))
-            result = self.service.open(str(request.get("action", "")), str(request.get("value", "")))
-            self._json(200, result)
+            action, value = str(request.get("action", "")), str(request.get("value", ""))
+            if self.path == "/api/jobs":
+                if self.jobs is None:
+                    self._json(503, {"ok": False, "error": "Jobs unavailable"})
+                    return
+                result = self.jobs.start(action, value)
+                self._json(202 if result["ok"] else 400, result)
+            else:
+                with getattr(self.service, "lock", nullcontext()):
+                    result = self.service.open(action, value)
+                self._json(200, result)
         except Exception as exc:
             LOG.exception("Browser command failed")
             self._json(500, {"ok": False, "error": f"Không thể tải trang: {str(exc)[:220]}"})
@@ -181,8 +226,10 @@ def run() -> None:
     if not cert.is_file() or not key.is_file():
         raise RuntimeError("Chưa có Office localhost certificate. Xem README để cài chứng chỉ một lần.")
     service = BrowserService()
-    handler = type("LocalHandler", (AddinHandler,), {"service": service})
-    server = HTTPServer((HOST, PORT), handler)
+    from .jobs import BrowseJobs
+    jobs = BrowseJobs(service)
+    handler = type("LocalHandler", (AddinHandler,), {"service": service, "jobs": jobs})
+    server = ThreadingHTTPServer((HOST, PORT), handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(str(cert), str(key))
     server.socket = context.wrap_socket(server.socket, server_side=True)
@@ -191,6 +238,7 @@ def run() -> None:
         server.serve_forever(poll_interval=0.35)
     finally:
         server.server_close()
+        jobs.close()
         service.close()
 
 

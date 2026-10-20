@@ -1,6 +1,8 @@
 """Fast HTML-only browser for public web pages, with transparent search fallback."""
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import CancelledError
 from urllib.parse import quote_plus
 
 import requests
@@ -25,15 +27,41 @@ class HttpTextBrowser:
     def connect(self) -> None:
         """HTTP requires no browser startup or extra authorization."""
 
-    def _fetch(self, url: str) -> PageData:
-        response = self.session.get(url, timeout=12)
-        response.raise_for_status()
-        if "html" not in response.headers.get("Content-Type", "").lower():
-            raise ValueError("Trang không phải HTML và không thể hiển thị dưới dạng text.")
-        soup = BeautifulSoup(response.content, "lxml")
-        title = soup.title.get_text(" ", strip=True) if soup.title else response.url
-        text, links, blocks = extract_page(soup, response.url)
-        return PageData(title=title, url=response.url, text=text, links=links, blocks=blocks)
+    @staticmethod
+    def _extract(html: bytes, url: str) -> PageData:
+        soup = BeautifulSoup(html, "lxml")
+        title = soup.title.get_text(" ", strip=True) if soup.title else url
+        text, links, blocks = extract_page(soup, url)
+        return PageData(title=title, url=url, text=text, links=links, blocks=blocks)
+
+    def _fetch(self, url: str, on_progress: Callable[[PageData], None] | None = None,
+               is_cancelled: Callable[[], bool] | None = None) -> PageData:
+        # A partial HTML snapshot can be displayed while a slow response is
+        # still downloading. Keep the final extraction identical to before.
+        if on_progress is None:
+            response = self.session.get(url, timeout=12)
+            response.raise_for_status()
+            if "html" not in response.headers.get("Content-Type", "").lower():
+                raise ValueError("Trang không phải HTML và không thể hiển thị dưới dạng text.")
+            return self._extract(response.content, response.url)
+        with self.session.get(url, timeout=(4, 12), stream=True) as response:
+            response.raise_for_status()
+            if "html" not in response.headers.get("Content-Type", "").lower():
+                raise ValueError("Trang không phải HTML và không thể hiển thị dưới dạng text.")
+            html = bytearray()
+            preview_attempts = 0
+            for chunk in response.iter_content(chunk_size=16384):
+                if is_cancelled and is_cancelled():
+                    raise CancelledError()
+                html.extend(chunk)
+                if (on_progress and preview_attempts < 2
+                        and len(html) >= (32768 if preview_attempts == 0 else 98304)):
+                    preview_attempts += 1
+                    preview = self._extract(bytes(html), response.url)
+                    if len(preview.text) >= 120:
+                        on_progress(preview)
+                        on_progress = None  # One preview; never repeatedly rebuild the UI.
+            return self._extract(bytes(html), response.url)
 
     def navigate(self, url: str) -> PageData:
         page = self._fetch(url)
