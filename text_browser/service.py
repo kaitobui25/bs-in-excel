@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import socket
 import ssl
 import threading
 from contextlib import nullcontext
@@ -26,11 +27,33 @@ from .title_filter import visible_title
 
 LOG = logging.getLogger(__name__)
 HOST = "127.0.0.1"
+IPV6_HOST = "::1"
 PORT = 3010
 BASE_URL = f"https://localhost:{PORT}"
 WEB_ROOT = Path(__file__).resolve().parent.parent / "addin"
 CERT_ROOT = Path.home() / ".office-addin-dev-certs"
 MAX_REQUEST_SIZE = 8 * 1024
+
+
+class IPv6LoopbackServer(ThreadingHTTPServer):
+    """Accept localhost's IPv6 address without exposing the add-in to LAN."""
+
+    address_family = socket.AF_INET6
+
+    def server_bind(self) -> None:
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
+
+def create_loopback_servers(handler: type[AddinHandler], port: int) -> list[ThreadingHTTPServer]:
+    """Bind IPv4 and IPv6 loopback on the same port; tolerate missing IPv6."""
+    ipv4 = ThreadingHTTPServer((HOST, port), handler)
+    servers = [ipv4]
+    try:
+        servers.append(IPv6LoopbackServer((IPV6_HOST, ipv4.server_port), handler))
+    except OSError:
+        LOG.warning("IPv6 localhost is unavailable; continuing with IPv4")
+    return servers
 
 
 class BrowserService:
@@ -229,15 +252,26 @@ def run() -> None:
     from .jobs import BrowseJobs
     jobs = BrowseJobs(service)
     handler = type("LocalHandler", (AddinHandler,), {"service": service, "jobs": jobs})
-    server = ThreadingHTTPServer((HOST, PORT), handler)
+    servers = create_loopback_servers(handler, PORT)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(str(cert), str(key))
-    server.socket = context.wrap_socket(server.socket, server_side=True)
-    LOG.info("Excel Text Browser add-in server ready on %s", BASE_URL)
+    for server in servers:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+    ipv6_thread = None
+    if len(servers) > 1:
+        ipv6_thread = threading.Thread(target=servers[1].serve_forever,
+                                       name="excel-ipv6-loopback", daemon=True)
+        ipv6_thread.start()
+    LOG.info("Excel Text Browser add-in server ready on %s (%d loopback listeners)",
+             BASE_URL, len(servers))
     try:
-        server.serve_forever(poll_interval=0.35)
+        servers[0].serve_forever(poll_interval=0.35)
     finally:
-        server.server_close()
+        if ipv6_thread:
+            servers[1].shutdown()
+            ipv6_thread.join(timeout=2)
+        for server in servers:
+            server.server_close()
         jobs.close()
         service.close()
 

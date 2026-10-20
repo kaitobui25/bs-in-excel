@@ -14,7 +14,7 @@ from text_browser.browser import PageData
 from text_browser.history import HistoryStore
 from text_browser.http_browser import HttpTextBrowser
 from text_browser.jobs import BrowseJobs
-from text_browser.service import AddinHandler, BASE_URL, PORT, BrowserService
+from text_browser.service import AddinHandler, BASE_URL, PORT, BrowserService, create_loopback_servers
 
 
 class JobApiTests(unittest.TestCase):
@@ -102,6 +102,38 @@ class JobApiTests(unittest.TestCase):
         self.assertEqual(code, 403)
         code, _ = self.call("GET", "/api/jobs/" + "f" * 32 + "?since=abc")
         self.assertEqual(code, 400)
+
+
+class DualLoopbackTests(unittest.TestCase):
+    def test_localhost_accepts_both_ipv4_and_ipv6_without_network_exposure(self):
+        handler = type("LoopbackTestHandler", (AddinHandler,),
+                       {"service": type("Stub", (), {"connected": False})()})
+        servers = create_loopback_servers(handler, 0)
+        threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            self.assertEqual(servers[0].server_address[0], "127.0.0.1")
+            if len(servers) == 1:
+                self.skipTest("IPv6 loopback unavailable")
+            self.assertEqual(servers[1].server_address[0], "::1")
+            port = servers[0].server_port
+            for host in ("127.0.0.1", "::1", "localhost"):
+                with self.subTest(host=host):
+                    conn = http.client.HTTPConnection(host, port, timeout=3)
+                    try:
+                        conn.request("GET", "/api/health", headers={"Host": f"localhost:{PORT}"})
+                        response = conn.getresponse()
+                        self.assertEqual(response.status, 200)
+                        self.assertTrue(json.loads(response.read())["ok"])
+                    finally:
+                        conn.close()
+        finally:
+            for server in servers:
+                server.shutdown()
+                server.server_close()
+            for thread in threads:
+                thread.join(timeout=2)
 
 
 if __name__ == "__main__":
