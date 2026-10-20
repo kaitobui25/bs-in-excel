@@ -59,6 +59,15 @@ class HTTPTests(unittest.TestCase):
             self.assertIn(mime, header)
             self.assertGreater(len(data), 100)
 
+    def test_reader_has_no_visible_status_bar_or_duplicate_url(self):
+        code, data, _ = self.make_request("GET", "/")
+        self.assertEqual(code, 200)
+        html = data.decode("utf-8")
+        self.assertIn('id="status" class="sr-only"', html)
+        self.assertNotIn('class="statusbar"', html)
+        self.assertNotIn('id="page-url"', html)
+        self.assertIn('id="address"', html)
+
     def test_search_action_json(self):
         body = json.dumps({"action": "search", "value": "siemens tia portal"}).encode()
         code, data, _ = self.make_request("POST", "/api/browse", body)

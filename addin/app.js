@@ -2,10 +2,11 @@
   "use strict";
   const $ = id => document.getElementById(id);
   const elements = {
+    toolbar: document.querySelector(".toolbar"),
     address: $("address"), form: $("address-form"), go: $("go"),
     back: $("back"), forward: $("forward"), reload: $("reload"),
     history: $("history"), status: $("status"),
-    welcome: $("welcome"), title: $("title"), url: $("page-url"),
+    welcome: $("welcome"), title: $("title"),
     notice: $("page-notice"), content: $("content"), loadMore: $("load-more"),
     links: $("links"), historyList: $("history-list")
   };
@@ -13,9 +14,14 @@
   let autoLoadEnabled = false;
 
   const setStatus = message => { elements.status.textContent = message; };
+  const showError = message => {
+    setStatus(message);
+    elements.notice.textContent = message;
+    elements.notice.hidden = false;
+  };
   const showOnly = (...visible) => {
     for (const element of [
-      elements.welcome, elements.title, elements.url, elements.notice,
+      elements.welcome, elements.title, elements.notice,
       elements.content, elements.loadMore, elements.links, elements.historyList
     ]) element.hidden = !visible.includes(element);
   };
@@ -45,7 +51,10 @@
 
   async function request(action, value = "") {
     if (busy) return;
+    // Avoid pinning the auto-hidden toolbar open after keyboard navigation.
+    if (elements.toolbar.contains(document.activeElement)) document.activeElement.blur();
     setBusy(true);
+    elements.notice.hidden = true;
     // A full-page navigation can take time on Facebook. Clear previously
     // loaded (possibly unfiltered) posts rather than show them below Loading.
     // "more" intentionally keeps the current posts while fetching the rest.
@@ -67,10 +76,9 @@
       if (data.history) showHistory(data.history);
       else if (data.page) showPage(data.page, action === "more");
     } catch (error) {
-      setStatus("Lỗi: " + error.message);
+      showError("Lỗi: " + error.message);
     } finally {
       setBusy(false);
-      elements.address.focus();
     }
   }
 
@@ -138,7 +146,6 @@
     const oldScroll = $("viewport").scrollTop;
     const showTitle = Boolean((page.title || "").trim());
     elements.title.textContent = showTitle ? page.title : "";
-    elements.url.textContent = page.url;
     elements.notice.textContent = page.notice || "";
     elements.address.value = page.url;
     const hasBlocks = Array.isArray(page.blocks) && page.blocks.length > 0;
@@ -155,7 +162,7 @@
       }
       elements.links.append(list);
     }
-    showOnly(...(showTitle ? [elements.title] : []), elements.url, elements.content,
+    showOnly(...(showTitle ? [elements.title] : []), elements.content,
       ...(page.has_more ? [elements.loadMore] : []),
       ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
     const postCount = hasBlocks ? page.blocks.filter(block => block.kind === "post").length : 0;
@@ -222,9 +229,10 @@
   const initialize = () => {
     fetch("/api/health")
       .then(response => response.json())
-      .then(data => setStatus(data.ok ? "Sẵn sàng · nhập URL hoặc tìm Google" : "Backend không khả dụng"))
-      .catch(() => setStatus("Không kết nối được backend. Kiểm tra launcher."));
-    elements.address.focus();
+      .then(data => data.ok
+        ? setStatus("Sẵn sàng · nhập URL hoặc tìm Google")
+        : showError("Backend không khả dụng"))
+      .catch(() => showError("Không kết nối được backend. Kiểm tra launcher."));
   };
   if (typeof Office !== "undefined" && typeof Office.onReady === "function") {
     Office.onReady(initialize);

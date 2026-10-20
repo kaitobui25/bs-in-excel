@@ -23,10 +23,7 @@
       </form>
       <button id="history" title="Lịch sử" aria-label="Lịch sử">Lịch sử</button>
     </header>
-    <section class="statusbar" role="status" aria-live="polite">
-      <span id="status">Sẵn sàng</span>
-      <span class="mode">TEXT ONLY</span>
-    </section>
+    <div id="status" class="sr-only" role="status" aria-live="polite">Sẵn sàng</div>
     <article id="viewport">
       <div id="welcome">
         <h2>Duyệt web ngay trong Excel</h2>
@@ -34,7 +31,6 @@
         <p class="examples"><button type="button" id="sample-siemens">Siemens TIA Portal</button> <button type="button" id="sample-facebook">Facebook</button> <button type="button" id="sample-google">Tìm: siemens tia portal</button></p>
       </div>
       <h1 id="title" hidden></h1>
-      <div id="page-url" hidden></div>
       <p id="page-notice" class="page-notice" hidden></p>
       <div id="content" hidden></div>
       <button type="button" id="load-more" hidden>Tải thêm bài viết</button>

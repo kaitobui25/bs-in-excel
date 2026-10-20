@@ -8,8 +8,13 @@ Excel-cell polling or terminal is required for daily use.
 
 1. Double-click the **Text Browser Excel** desktop shortcut, or run
    `Open Text Browser.vbs` in this folder.
-2. An Excel workbook opens with an embedded text browser. Type into its
-   address bar, press Enter, or click the on-screen buttons.
+2. An Excel workbook opens with an embedded text browser. Hover over the
+   add-in's top-left corner to reveal the navigation bar, type into its address
+   field and press Enter, or click a navigation button. Move away to hide the
+   bar. Keyboard Tab focus also reveals it. On touch-only devices it stays
+   visible so navigation remains accessible.
+   The reading view omits the load statistics and duplicate page URL; the URL
+   remains available in the navigation bar. Errors still appear in the view.
 
 The reusable workbook is `Text Browser.xlsx` next to this README. Its Office
 Content Add-in manifest points to the local trusted catalog at
