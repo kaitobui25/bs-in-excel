@@ -143,6 +143,9 @@ class BrowserService:
 class AddinHandler(BaseHTTPRequestHandler):
     service: BrowserService
     jobs = None  # Set by run(); legacy HTTP tests can use the handler alone.
+    # Polling reuses one HTTPS connection instead of a new TLS handshake for
+    # every progress update. All responses have explicit Content-Length.
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: object) -> None:
         LOG.info("%s %s", self.address_string(), fmt % args)

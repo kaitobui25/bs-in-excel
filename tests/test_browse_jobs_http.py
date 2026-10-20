@@ -126,6 +126,12 @@ class DualLoopbackTests(unittest.TestCase):
                         response = conn.getresponse()
                         self.assertEqual(response.status, 200)
                         self.assertTrue(json.loads(response.read())["ok"])
+                        first_socket = conn.sock
+                        conn.request("GET", "/api/health", headers={"Host": f"localhost:{PORT}"})
+                        response = conn.getresponse()
+                        self.assertEqual(response.status, 200)
+                        self.assertTrue(json.loads(response.read())["ok"])
+                        self.assertIs(conn.sock, first_socket)  # HTTP/1.1 keep-alive
                     finally:
                         conn.close()
         finally:
