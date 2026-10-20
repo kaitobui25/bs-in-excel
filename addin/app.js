@@ -127,7 +127,8 @@
 
   function showPage(page, keepPosition = false) {
     const oldScroll = $("viewport").scrollTop;
-    elements.title.textContent = page.title || "Không có tiêu đề";
+    const showTitle = Boolean((page.title || "").trim());
+    elements.title.textContent = showTitle ? page.title : "";
     elements.url.textContent = page.url;
     elements.notice.textContent = page.notice || "";
     elements.address.value = page.url;
@@ -145,7 +146,7 @@
       }
       elements.links.append(list);
     }
-    showOnly(elements.title, elements.url, elements.content,
+    showOnly(...(showTitle ? [elements.title] : []), elements.url, elements.content,
       ...(page.has_more ? [elements.loadMore] : []),
       ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
     const postCount = hasBlocks ? page.blocks.filter(block => block.kind === "post").length : 0;

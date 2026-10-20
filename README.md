@@ -38,6 +38,13 @@ Results are not represented as if they came directly from Google.
 Normal text links are clickable in their original reading positions.
 Filtered image positions display small empty picture outlines, not image data.
 
+**Page title filter:** only pages on `siemens.com` and its subdomains show the
+large page title above the text. Facebook, social networks, news and other
+websites show their URL and content without that page title. Browsing history
+uses the URL instead of the title for those sites. Add new domains to
+`TITLE_HOSTS` in `text_browser/title_filter.py` to extend the allow-list.
+Page content headings and Facebook post authors remain visible.
+
 ## Architecture
 
     Excel Content Add-in (addin/index.html, app.js, style.css)

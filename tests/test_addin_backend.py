@@ -65,8 +65,43 @@ class AddinBackendTests(unittest.TestCase):
         response = self.service.open("navigate", url)
         self.assertTrue(response["ok"])
         self.assertEqual(response["page"]["url"], url)
+        self.assertEqual(response["page"]["title"], "Test")
         self.assertEqual(self.browser.connect_count, 1)
         self.assertEqual(self.service.open("history")["history"][0]["url"], url)
+
+    def test_page_and_history_titles_hidden_outside_siemens(self):
+        for url in ("https://www.facebook.com/", "https://www.reuters.com/", "https://example.com/"):
+            with self.subTest(url=url):
+                result = self.service.open("navigate", url)
+                self.assertEqual(result["page"]["title"], "")
+                self.assertEqual(result["page"]["text"], "text only")
+                self.assertEqual(len(result["page"]["links"]), 1)
+        entries = self.service.open("history")["history"]
+        self.assertTrue(entries)
+        self.assertTrue(all(entry["title"] == "" for entry in entries))
+        # Raw titles remain in the private history model for internal use.
+        self.assertTrue(all(entry.title == "Test" for entry in self.service.history.entries))
+
+    def test_history_titles_use_the_same_allow_list(self):
+        self.service.open("navigate", "https://support.industry.siemens.com/cs/")
+        self.service.open("navigate", "https://www.facebook.com/")
+        history = self.service.open("history")["history"]
+        self.assertEqual([entry["title"] for entry in history], ["", "Test"])
+
+    def test_redirect_destination_controls_title_visibility(self):
+        def navigate(url):
+            return PageData("Siemens website", "https://example.com/redirected", "Text", [])
+        self.browser.navigate = navigate
+        result = self.service.open("navigate", "https://www.siemens.com/")
+        self.assertEqual(result["page"]["title"], "")
+        self.assertEqual(result["page"]["url"], "https://example.com/redirected")
+
+    def test_search_and_facebook_more_do_not_show_titles(self):
+        self.assertEqual(self.service.open("search", "siemens tia portal")["page"]["title"], "")
+        more = self.service.open("more")["page"]
+        self.assertEqual(more["title"], "")
+        self.assertEqual(more["blocks"][0]["kind"], "post")
+        self.assertTrue(more["has_more"])
 
     def test_reject_dangerous_schemes(self):
         for url in ["file:///C:/secret", "javascript:alert(1)", "https://a:b@example.com"]:

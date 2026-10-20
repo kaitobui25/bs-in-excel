@@ -20,6 +20,7 @@ from .http_browser import HttpTextBrowser
 from .hybrid_browser import HybridTextBrowser
 from .config import LOCAL_DATA, MAX_LINKS, MAX_TEXT
 from .history import HistoryStore
+from .title_filter import visible_title
 
 LOG = logging.getLogger(__name__)
 HOST = "127.0.0.1"
@@ -46,7 +47,10 @@ class BrowserService:
 
     def open(self, action: str, value: str = "") -> dict:
         if action == "history":
-            return {"ok": True, "history": [asdict(e) for e in self.history.entries], "page": None}
+            return {"ok": True, "history": [
+                {**asdict(e), "title": visible_title(e.url, e.title)}
+                for e in self.history.entries
+            ], "page": None}
         if action not in {"navigate", "search", "back", "forward", "reload", "more"}:
             return {"ok": False, "error": "Lệnh không hỗ trợ."}
         if action == "navigate":
@@ -79,7 +83,7 @@ class BrowserService:
         self.links = page.links[:MAX_LINKS]
         self.history.add(page.url, page.title)
         return {"ok": True, "page": {
-            "title": page.title,
+            "title": visible_title(page.url, page.title),
             "url": page.url,
             "text": page.text[:MAX_TEXT],
             "links": [asdict(link) for link in self.links],
