@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from .browser import Link, PageData
+from .config import LOCAL_DATA
 from .facebook_ads import is_ad_post
 from .html_content import extract_page
 from .http_browser import HttpTextBrowser
@@ -115,7 +116,9 @@ class FacebookNeo:
     """Extract posts from a single Neo tab without touching existing tabs."""
 
     def __init__(self) -> None:
-        self._page = NeoPage(block_media=True)
+        self._page = NeoPage(block_media=True,
+                             tab_store=LOCAL_DATA / "neo-facebook-tab.json",
+                             reuse_hosts=("facebook.com", "fb.com", "fb.watch"))
         self._posts: dict[str, dict] = {}
         self._ads_filtered = 0
         self._url = ""

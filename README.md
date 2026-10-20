@@ -57,8 +57,13 @@ HTTP is the fast default for normal sites. Facebook rejects plain HTTP
 requests, so opening Facebook connects to **BrowserOS Neo** through its local
 MCP endpoint `http://127.0.0.1:9010/mcp`. **Start BrowserOS Neo before using
 Facebook in Excel.** The backend lazily creates one Neo background tab and
-reuses it. It never navigates or closes your existing Neo tabs or personal
-Google Chrome tabs. The Neo session/profile owns its own login state; no
+reuses it, including after a backend restart or an expired MCP session. It
+remembers that tab's `tabId` and `groupId` locally in
+`%LOCALAPPDATA%\bs-in-excel\neo-facebook-tab.json`. If the tab was closed,
+the next visit creates one replacement. The tab is left open when the backend
+stops, so later launches can reuse it. Older duplicate agent tabs from
+previous versions are not automatically closed. Personal tabs are never
+selected for reuse. The Neo session/profile owns its own login state; no
 cookies, tokens, or profile files are copied from other browsers.
 
 **First-time Facebook setup:** sign in to Facebook in the BrowserOS Neo app
