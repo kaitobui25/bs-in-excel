@@ -24,6 +24,7 @@ from .hybrid_browser import HybridTextBrowser
 from .config import LOCAL_DATA, MAX_LINKS, MAX_TEXT
 from .history import HistoryStore
 from .title_filter import visible_title
+from .translation import translate_segments
 
 LOG = logging.getLogger(__name__)
 HOST = "127.0.0.1"
@@ -212,18 +213,30 @@ class AddinHandler(BaseHTTPRequestHandler):
         if not self._trusted_host() or self.headers.get("Origin") != BASE_URL:
             self._json(403, {"ok": False, "error": "Invalid origin"})
             return
-        if self.path not in {"/api/browse", "/api/jobs"} or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+        if self.path not in {"/api/browse", "/api/jobs", "/api/translate"} or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             self._json(404, {"ok": False, "error": "Endpoint not found"})
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             size = 0
-        if not 0 < size <= MAX_REQUEST_SIZE:
+        if not 0 < size <= (16 * 1024 if self.path == "/api/translate" else MAX_REQUEST_SIZE):
             self._json(413, {"ok": False, "error": "Request too large"})
             return
         try:
             request = json.loads(self.rfile.read(size))
+            if not isinstance(request, dict):
+                self._json(400, {"ok": False, "error": "Invalid JSON request"})
+                return
+            if self.path == "/api/translate":
+                try:
+                    translated = translate_segments(request.get("texts"), request.get("target"))
+                    self._json(200, {"ok": True, "texts": translated})
+                except ValueError as exc:
+                    self._json(400, {"ok": False, "error": str(exc)})
+                except RuntimeError as exc:
+                    self._json(502, {"ok": False, "error": str(exc)})
+                return
             action, value = str(request.get("action", "")), str(request.get("value", ""))
             if self.path == "/api/jobs":
                 if self.jobs is None:

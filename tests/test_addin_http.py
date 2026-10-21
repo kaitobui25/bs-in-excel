@@ -3,6 +3,7 @@ import http.client
 import json
 import threading
 import unittest
+from unittest.mock import patch
 from http.server import HTTPServer
 
 from text_browser.service import AddinHandler, BASE_URL, PORT
@@ -78,6 +79,24 @@ class HTTPTests(unittest.TestCase):
         self.assertIn('fetch("/api/jobs"', script)
         self.assertIn('-webkit-line-clamp: 4', css)
         self.assertIn('.block-post.post-collapsed .post-links', css)
+
+    def test_reader_menu_and_translation_controls(self):
+        _, html, _ = self.make_request("GET", "/")
+        _, script, _ = self.make_request("GET", "/app.js")
+        html, script = html.decode("utf-8"), script.decode("utf-8")
+        for element in ("scroll-top", "translate-en", "translate-vi", "translate-original"):
+            self.assertIn(f'id="{element}"', html)
+        self.assertIn('fetch("/api/translate"', script)
+
+    @patch("text_browser.service.translate_segments", return_value=["Hello", "Good morning"])
+    def test_translate_json_route(self, translate):
+        body = json.dumps({"target": "en", "texts": ["こんにちは", "Chào buổi sáng"]}).encode()
+        code, response, _ = self.make_request("POST", "/api/translate", body)
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(response)["texts"], ["Hello", "Good morning"])
+        translate.assert_called_once_with(["こんにちは", "Chào buổi sáng"], "en")
+        code, _, _ = self.make_request("POST", "/api/translate", body, "https://evil.example")
+        self.assertEqual(code, 403)
 
     def test_search_action_json(self):
         body = json.dumps({"action": "search", "value": "siemens tia portal"}).encode()

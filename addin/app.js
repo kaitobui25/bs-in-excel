@@ -3,6 +3,9 @@
   const $ = id => document.getElementById(id);
   const elements = {
     toolbar: document.querySelector(".toolbar"),
+    navToggle: $("nav-toggle"), top: $("scroll-top"), viewport: $("viewport"),
+    original: $("translate-original"), translateEn: $("translate-en"),
+    translateVi: $("translate-vi"), translateStatus: $("translate-status"),
     address: $("address"), form: $("address-form"), go: $("go"),
     back: $("back"), forward: $("forward"), reload: $("reload"),
     history: $("history"), status: $("status"),
@@ -15,6 +18,11 @@
   let requestVersion = 0;
   let activeRequest = null;
   const expandedPosts = new Set();
+  let translationLanguage = null;
+  let translationVersion = 0;
+  let originalNodes = [];
+  const translationControllers = new Set();
+  const translationCache = new Map();
 
   const setStatus = message => { elements.status.textContent = message; };
   const showError = message => {
@@ -40,6 +48,166 @@
     elements.loadMore.disabled = active;
   };
 
+  function stopTranslation() {
+    translationVersion++;
+    for (const controller of translationControllers) controller.abort();
+    translationControllers.clear();
+    elements.translateStatus.textContent = "";
+    elements.translateStatus.title = "";
+  }
+
+  function updateLanguageButtons() {
+    for (const [element, language] of [
+      [elements.original, null], [elements.translateEn, "en"], [elements.translateVi, "vi"]
+    ]) element.setAttribute("aria-pressed", String(translationLanguage === language));
+  }
+
+  // Save the original text nodes so language changes never retranslate a
+  // previous translation. Anchors, buttons and image placeholders are intact.
+  function captureTextNodes() {
+    originalNodes = [];
+    for (const root of [elements.title, elements.content, elements.links]) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (!node.nodeValue.trim() ||
+            node.parentElement.closest(".post-author, .post-toggle, .image-placeholder")) continue;
+        originalNodes.push({ node, source: node.nodeValue });
+      }
+    }
+  }
+
+  function splitTranslationText(source) {
+    const result = [];
+    let chunk = "";
+    let encodedLength = 0;
+    // Limit URL-encoded length as well as characters: Japanese and Vietnamese
+    // can make a query much larger than the original JS string.
+    for (const character of source) {
+      const size = encodeURIComponent(character).length;
+      if (chunk && encodedLength + size > 2600) {
+        result.push(chunk);
+        chunk = "";
+        encodedLength = 0;
+      }
+      chunk += character;
+      encodedLength += size;
+    }
+    if (chunk) result.push(chunk);
+    return result;
+  }
+
+  async function translateVisiblePage() {
+    stopTranslation();
+    for (const { node, source } of originalNodes) node.nodeValue = source;
+    if (!translationLanguage || !originalNodes.length || elements.content.hidden) return;
+    const version = translationVersion;
+    const language = translationLanguage;
+    const pending = [];
+
+    for (const { node, source } of originalNodes) {
+      const plain = source.trim();
+      if (!/[\p{L}]/u.test(plain) || /^https?:\/\/\S+$/.test(plain)) continue;
+      const start = source.indexOf(plain);
+      const prefix = source.slice(0, start);
+      const suffix = source.slice(start + plain.length);
+      const pieces = splitTranslationText(plain);
+      const translated = pieces.map(part => translationCache.get(language + "\u0000" + part) ?? null);
+      const display = () => {
+        if (translated.every(value => value !== null)) {
+          node.nodeValue = prefix + translated.join("") + suffix;
+        }
+      };
+      display();
+      pieces.forEach((text, index) => {
+        if (translated[index] === null) pending.push({ text, translated, index, display });
+      });
+    }
+
+    if (!pending.length) {
+      elements.translateStatus.textContent = "Xong";
+      updatePostPreviews();
+      return;
+    }
+
+    const batches = [];
+    let batchLength = 0;
+    let batchCharacters = 0;
+    for (const item of pending) {
+      let batch = batches[batches.length - 1];
+      const encodedLength = encodeURIComponent(item.text).length;
+      if (!batch || batch.length >= 18 || batchLength + encodedLength > 7000 ||
+          batchCharacters + item.text.length > 3600) {
+        batch = [];
+        batches.push(batch);
+        batchLength = 0;
+        batchCharacters = 0;
+      }
+      batch.push(item);
+      batchLength += encodedLength;
+      batchCharacters += item.text.length;
+    }
+
+    let next = 0;
+    let done = 0;
+    let failure = "";
+    elements.translateStatus.textContent = "Đang dịch…";
+    const worker = async () => {
+      while (next < batches.length && !failure && version === translationVersion) {
+        const batch = batches[next++];
+        const controller = new AbortController();
+        translationControllers.add(controller);
+        try {
+          const response = await fetch("/api/translate", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target: language, texts: batch.map(item => item.text) }),
+            signal: controller.signal
+          });
+          const result = await response.json();
+          if (!response.ok || !result.ok || result.texts.length !== batch.length) {
+            throw new Error(result.error || "Không thể dịch trang.");
+          }
+          if (version !== translationVersion) return;
+          batch.forEach((item, index) => {
+            const trailing = item.text.match(/\s+$/)?.[0] || "";
+            const translated = result.texts[index] +
+              (trailing && !/\s$/.test(result.texts[index]) ? trailing : "");
+            item.translated[item.index] = translated;
+            const key = language + "\u0000" + item.text;
+            translationCache.set(key, translated);
+            if (translationCache.size > 1600) translationCache.delete(translationCache.keys().next().value);
+            item.display();
+          });
+          done += batch.length;
+          elements.translateStatus.textContent = `${done}/${pending.length}`;
+          updatePostPreviews();
+        } catch (error) {
+          if (version === translationVersion && error.name !== "AbortError") {
+            failure = error.message;
+          }
+        } finally {
+          translationControllers.delete(controller);
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    if (version === translationVersion) {
+      elements.translateStatus.textContent = failure ? "Lỗi dịch" : "Xong";
+      elements.translateStatus.title = failure;
+      if (failure) setStatus("Dịch thất bại: " + failure);
+    }
+  }
+
+  function changeTranslation(language) {
+    if (elements.content.hidden) {
+      setStatus("Mở một trang trước khi dịch.");
+      return;
+    }
+    translationLanguage = language;
+    updateLanguageButtons();
+    void translateVisiblePage();
+  }
+
   const parseAddress = input => {
     const raw = input.trim();
     if (!raw) return null;
@@ -58,6 +226,8 @@
     activeRequest = controller;
     // Avoid pinning the auto-hidden toolbar open after keyboard navigation.
     if (elements.toolbar.contains(document.activeElement)) document.activeElement.blur();
+    elements.toolbar.classList.remove("pinned-open");
+    elements.navToggle.setAttribute("aria-expanded", "false");
     setBusy(true);
     elements.notice.textContent = action === "more" ? "Đang tải thêm bài viết…" : "Đang tải trang…";
     elements.notice.hidden = false;
@@ -65,6 +235,8 @@
     // loaded (possibly unfiltered) posts rather than show them below Loading.
     // "more" intentionally keeps the current posts while fetching the rest.
     if (action !== "more") {
+      stopTranslation();
+      originalNodes = [];
       autoLoadEnabled = false;
       expandedPosts.clear();
       elements.content.replaceChildren();
@@ -209,6 +381,7 @@
   }
 
   function showPage(page, keepPosition = false) {
+    stopTranslation();
     const oldScroll = $("viewport").scrollTop;
     const showTitle = Boolean((page.title || "").trim());
     elements.title.textContent = showTitle ? page.title : "";
@@ -243,9 +416,13 @@
       const target = document.getElementById(fragmentId);
       if (target) target.scrollIntoView({ block: "start" });
     }
+    captureTextNodes();
+    if (translationLanguage) void translateVisiblePage();
   }
 
   function showHistory(entries) {
+    stopTranslation();
+    originalNodes = [];
     autoLoadEnabled = false;
     elements.historyList.replaceChildren(make("h2", "Lịch sử (" + entries.length + ")"));
     if (!entries.length) elements.historyList.append(make("p", "Chưa có lịch sử."));
@@ -295,6 +472,15 @@
     }
   });
   elements.back.addEventListener("click", () => request("back"));
+  elements.top.addEventListener("click", () => elements.viewport.scrollTo({ top: 0, behavior: "smooth" }));
+  elements.navToggle.addEventListener("click", () => {
+    const open = elements.toolbar.classList.toggle("pinned-open");
+    elements.navToggle.setAttribute("aria-expanded", String(open));
+    if (open) elements.address.focus();
+  });
+  elements.original.addEventListener("click", () => changeTranslation(null));
+  elements.translateEn.addEventListener("click", () => changeTranslation("en"));
+  elements.translateVi.addEventListener("click", () => changeTranslation("vi"));
   elements.forward.addEventListener("click", () => request("forward"));
   elements.reload.addEventListener("click", () => request("reload"));
   elements.history.addEventListener("click", () => request("history"));

@@ -11,7 +11,17 @@
 </head>
 <body>
   <main id="app">
-    <header class="toolbar">
+    <div class="reader-menu" role="toolbar" aria-label="Công cụ đọc trang">
+      <button type="button" id="nav-toggle" aria-label="Thanh địa chỉ" aria-controls="navigation-bar" aria-expanded="false" title="Thanh địa chỉ">☰</button>
+      <button type="button" id="scroll-top" title="Về đầu trang" aria-label="Về đầu trang">↑ Đầu trang</button>
+      <span class="menu-spacer"></span>
+      <span class="translate-label">Dịch:</span>
+      <button type="button" id="translate-original" title="Hiện văn bản gốc" aria-pressed="true">Gốc</button>
+      <button type="button" id="translate-en" title="Dịch sang tiếng Anh" aria-pressed="false">EN</button>
+      <button type="button" id="translate-vi" title="Dịch sang tiếng Việt" aria-pressed="false">VI</button>
+      <span id="translate-status" role="status" aria-live="polite" title=""></span>
+    </div>
+    <header id="navigation-bar" class="toolbar">
       <nav class="nav" aria-label="Navigation">
         <button id="back" title="Quay lại" aria-label="Quay lại">←</button>
         <button id="forward" title="Tiến tới" aria-label="Tiến tới">→</button>
