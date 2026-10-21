@@ -70,4 +70,3 @@ class FilterSettingsStoreTests(unittest.TestCase):
             thread.join(timeout=3)
             self.assertFalse(thread.is_alive())
         self.assertEqual(len(self.store.load()["keywords"]), 1)
-

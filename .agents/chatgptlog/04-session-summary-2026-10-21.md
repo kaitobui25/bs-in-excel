@@ -1,8 +1,10 @@
 # 04 — Tổng hợp session: bộ lọc từ khóa và Settings → Filter
 
-**Ngày:** 2026-10-21  
-**Dự án:** `bs-in-excel` / Text Browser in Excel  
-**Workspace:** `C:\phong\AI\other\bs-in-excel\main`  
+**Ngày:** 2026-10-21
+
+**Dự án:** `bs-in-excel` / Text Browser in Excel
+
+**Workspace:** `C:\phong\AI\other\bs-in-excel\main`
 **Phạm vi:** Công việc tiếp nối `03-session-summary-2026-10-20.md`, bao gồm commit các thay đổi còn tồn, bộ lọc nội dung JavaScript, hỗ trợ URL/tên ghép và giao diện chỉnh danh sách. Đây là **bản bàn giao kỹ thuật**, không phải transcript.
 
 ## 1. Các yêu cầu theo thứ tự
