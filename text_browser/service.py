@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from .browser import Link, PageData
 from .hybrid_browser import HybridTextBrowser
 from .config import LOCAL_DATA, MAX_LINKS, MAX_TEXT
+from .filter_settings import FilterSettingsStore
 from .history import HistoryStore
 from .title_filter import visible_title
 from .translation import translate_segments
@@ -34,6 +35,7 @@ BASE_URL = f"https://localhost:{PORT}"
 WEB_ROOT = Path(__file__).resolve().parent.parent / "addin"
 CERT_ROOT = Path.home() / ".office-addin-dev-certs"
 MAX_REQUEST_SIZE = 8 * 1024
+MAX_FILTER_SETTINGS_REQUEST_SIZE = 512 * 1024
 
 
 class IPv6LoopbackServer(ThreadingHTTPServer):
@@ -144,6 +146,8 @@ class BrowserService:
 class AddinHandler(BaseHTTPRequestHandler):
     service: BrowserService
     jobs = None  # Set by run(); legacy HTTP tests can use the handler alone.
+    filter_settings = FilterSettingsStore(
+        WEB_ROOT / "sensitive-words.json", LOCAL_DATA / "sensitive-words.json")
     # Polling reuses one HTTPS connection instead of a new TLS handshake for
     # every progress update. All responses have explicit Content-Length.
     protocol_version = "HTTP/1.1"
@@ -193,10 +197,20 @@ class AddinHandler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self._json(200, {"ok": True, "connected": self.service.connected})
             return
+        if path == "/api/filter-settings":
+            try:
+                self._json(200, {"ok": True, "settings": self.filter_settings.load()})
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                LOG.exception("Failed to read filter settings")
+                self._json(500, {"ok": False, "error": "Không thể đọc cấu hình lọc."})
+            return
         asset = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/index.html": ("index.html", "text/html; charset=utf-8"),
             "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+            "/sensitive-filter.js": ("sensitive-filter.js", "application/javascript; charset=utf-8"),
+            "/filter-settings.js": ("filter-settings.js", "application/javascript; charset=utf-8"),
+            "/sensitive-words.json": ("sensitive-words.json", "application/json; charset=utf-8"),
             "/style.css": ("style.css", "text/css; charset=utf-8"),
             "/icon.png": ("icon.png", "image/png"),
         }.get(path)
@@ -213,18 +227,24 @@ class AddinHandler(BaseHTTPRequestHandler):
         if not self._trusted_host() or self.headers.get("Origin") != BASE_URL:
             self._json(403, {"ok": False, "error": "Invalid origin"})
             return
-        if self.path not in {"/api/browse", "/api/jobs", "/api/translate"} or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+        if self.path not in {"/api/browse", "/api/jobs", "/api/translate", "/api/filter-settings"} or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             self._json(404, {"ok": False, "error": "Endpoint not found"})
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             size = 0
-        if not 0 < size <= (16 * 1024 if self.path == "/api/translate" else MAX_REQUEST_SIZE):
+        limit = (MAX_FILTER_SETTINGS_REQUEST_SIZE if self.path == "/api/filter-settings" else
+                 16 * 1024 if self.path == "/api/translate" else MAX_REQUEST_SIZE)
+        if not 0 < size <= limit:
             self._json(413, {"ok": False, "error": "Request too large"})
             return
         try:
-            request = json.loads(self.rfile.read(size))
+            try:
+                request = json.loads(self.rfile.read(size))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._json(400, {"ok": False, "error": "JSON không hợp lệ."})
+                return
             if not isinstance(request, dict):
                 self._json(400, {"ok": False, "error": "Invalid JSON request"})
                 return
@@ -236,6 +256,19 @@ class AddinHandler(BaseHTTPRequestHandler):
                     self._json(400, {"ok": False, "error": str(exc)})
                 except RuntimeError as exc:
                     self._json(502, {"ok": False, "error": str(exc)})
+                return
+            if self.path == "/api/filter-settings":
+                if set(request) != {"keywords"}:
+                    self._json(400, {"ok": False, "error": "Chỉ hỗ trợ cập nhật danh sách từ lọc."})
+                    return
+                try:
+                    settings = self.filter_settings.save(request["keywords"])
+                    self._json(200, {"ok": True, "settings": settings})
+                except (ValueError, TypeError) as exc:
+                    self._json(400, {"ok": False, "error": str(exc)})
+                except OSError:
+                    LOG.exception("Failed to save filter settings")
+                    self._json(500, {"ok": False, "error": "Không thể lưu danh sách lọc."})
                 return
             action, value = str(request.get("action", "")), str(request.get("value", ""))
             if self.path == "/api/jobs":

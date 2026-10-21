@@ -2,11 +2,15 @@
 import http.client
 import json
 import threading
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from http.server import HTTPServer
 
 from text_browser.service import AddinHandler, BASE_URL, PORT
+from text_browser.filter_settings import FilterSettingsStore
+from text_browser.service import WEB_ROOT
 
 
 class FakeService:
@@ -24,7 +28,12 @@ class FakeService:
 class HTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.handler = type("TestAddinHandler", (AddinHandler,), {"service": FakeService()})
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.handler = type("TestAddinHandler", (AddinHandler,), {
+            "service": FakeService(),
+            "filter_settings": FilterSettingsStore(
+                WEB_ROOT / "sensitive-words.json", Path(cls.temp.name) / "sensitive-words.json")
+        })
         cls.server = HTTPServer(("127.0.0.1", 0), cls.handler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -34,6 +43,7 @@ class HTTPTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=2)
+        cls.temp.cleanup()
 
     def make_request(self, method, path, body=None, origin=BASE_URL):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=4)
@@ -87,6 +97,81 @@ class HTTPTests(unittest.TestCase):
         for element in ("scroll-top", "translate-en", "translate-vi", "translate-original"):
             self.assertIn(f'id="{element}"', html)
         self.assertIn('fetch("/api/translate"', script)
+
+    def test_sensitive_filter_assets_and_rendering_integration(self):
+        _, html, _ = self.make_request("GET", "/")
+        html = html.decode("utf-8")
+        self.assertIn('src="/sensitive-filter.js"', html)
+        self.assertLess(html.index('src="/sensitive-filter.js"'), html.index('src="/app.js"'))
+        for path, mime in [("/sensitive-filter.js", "application/javascript"),
+                           ("/filter-settings.js", "application/javascript"),
+                           ("/sensitive-words.json", "application/json")]:
+            code, data, content_type = self.make_request("GET", path)
+            self.assertEqual(code, 200)
+            self.assertIn(mime, content_type)
+            self.assertGreater(len(data), 50)
+        _, config, _ = self.make_request("GET", "/sensitive-words.json")
+        self.assertIn("pokemon", json.loads(config)["keywords"])
+        self.assertIn("nintendo", json.loads(config)["keywords"])
+        self.assertIn("pokecenter", json.loads(config)["keywords"])
+        self.assertIn("Poké Center", json.loads(config)["keywords"])
+        self.assertIn("center", json.loads(config)["compoundSuffixes"])
+        _, script, _ = self.make_request("GET", "/app.js")
+        script = script.decode("utf-8")
+        self.assertIn('await filterReady', script)
+        self.assertIn('entry.node.nodeValue = sensitiveFilter.maskText(entry.display)', script)
+        self.assertIn('entry.display = prefix + translated.join("") + suffix', script)
+        self.assertIn('captureHistoryNodes()', script)
+        self.assertIn('refreshVisibleFilter()', script)
+        self.assertIn('maskedPageAddress = sensitiveFilter.maskUrl(url)', script)
+        self.assertIn('displayAddress(page.url)', script)
+        self.assertIn('elements.address.value === maskedPageAddress', script)
+        self.assertIn('link.href = url', script)
+
+    def test_filter_settings_menu_assets(self):
+        _, html, _ = self.make_request("GET", "/")
+        _, script, _ = self.make_request("GET", "/app.js")
+        html, script = html.decode("utf-8"), script.decode("utf-8")
+        for element in ("settings-toggle", "settings-menu", "settings-filter",
+                        "filter-panel", "filter-keywords", "filter-save", "filter-cancel"):
+            self.assertIn(f'id="{element}"', html)
+        self.assertLess(html.index('src="/filter-settings.js"'), html.index('src="/app.js"'))
+        self.assertIn('fetch("/api/filter-settings"', script)
+        self.assertIn('entry.display = prefix + translated.join("") + suffix', script)
+        self.assertIn('return applyFilterSettings(result.settings)', script)
+
+    def test_filter_settings_get_post_and_validation(self):
+        code, body, _ = self.make_request("GET", "/api/filter-settings")
+        self.assertEqual(code, 200)
+        self.assertTrue(json.loads(body)["ok"])
+        data = json.dumps({"keywords": ["zoo", "Pokémon", "Alpha", "  alpha  "]}).encode()
+        code, body, _ = self.make_request("POST", "/api/filter-settings", body=data)
+        self.assertEqual(code, 200)
+        result = json.loads(body)["settings"]
+        self.assertEqual(result["keywords"], ["Alpha", "Pokémon", "zoo"])
+        self.assertIn("compoundSuffixes", result)
+        code, body, _ = self.make_request("GET", "/api/filter-settings")
+        self.assertEqual(json.loads(body)["settings"]["keywords"], result["keywords"])
+        for body in ({"keywords": "not-list"}, {"keywords": ["a\nb"]},
+                     {"keywords": ["a"], "enabled": False}, {"mask": {}}):
+            code, _, _ = self.make_request("POST", "/api/filter-settings",
+                                           body=json.dumps(body).encode())
+            self.assertEqual(code, 400)
+        code, _, _ = self.make_request("POST", "/api/filter-settings", body=b"{bad json")
+        self.assertEqual(code, 400)
+        code, _, _ = self.make_request("POST", "/api/filter-settings",
+                                       body=b'{"keywords":[1]}')
+        self.assertEqual(code, 400)
+        code, body, _ = self.make_request("GET", "/api/filter-settings")
+        self.assertEqual(json.loads(body)["settings"]["keywords"], result["keywords"])
+
+    def test_filter_settings_write_requires_same_origin(self):
+        code, _, _ = self.make_request("POST", "/api/filter-settings",
+                                       body=b'{"keywords":[]}', origin="https://other.example")
+        self.assertEqual(code, 403)
+        code, _, _ = self.make_request("GET", "/api/filter-settings",
+                                       origin="https://other.example")
+        self.assertEqual(code, 403)
 
     @patch("text_browser.service.translate_segments", return_value=["Hello", "Good morning"])
     def test_translate_json_route(self, translate):

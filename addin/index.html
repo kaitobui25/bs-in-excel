@@ -7,6 +7,8 @@
   <title>Text Browser · Excel</title>
   <link rel="stylesheet" href="/style.css"/>
   <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
+  <script defer src="/sensitive-filter.js"></script>
+  <script defer src="/filter-settings.js"></script>
   <script defer src="/app.js"></script>
 </head>
 <body>
@@ -20,7 +22,26 @@
       <button type="button" id="translate-en" title="Dịch sang tiếng Anh" aria-pressed="false">EN</button>
       <button type="button" id="translate-vi" title="Dịch sang tiếng Việt" aria-pressed="false">VI</button>
       <span id="translate-status" role="status" aria-live="polite" title=""></span>
+      <div class="settings-dropdown">
+        <button type="button" id="settings-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="settings-menu" title="Cài đặt">Settings ▾</button>
+        <div id="settings-menu" class="settings-menu" hidden>
+          <button type="button" id="settings-filter">Filter</button>
+        </div>
+      </div>
     </div>
+    <section id="filter-panel" class="filter-panel" role="dialog" aria-labelledby="filter-heading" hidden>
+      <h2 id="filter-heading">Filter — danh sách từ</h2>
+      <label for="filter-keywords">Mỗi dòng là một từ hoặc cụm từ cần che:</label>
+      <textarea id="filter-keywords" rows="12" spellcheck="false" aria-describedby="filter-count"></textarea>
+      <div class="filter-footer">
+        <span id="filter-count">0 từ</span>
+        <div class="filter-actions">
+          <button type="button" id="filter-cancel">Cancel</button>
+          <button type="button" id="filter-save">Save</button>
+        </div>
+      </div>
+      <p id="filter-message" role="status" aria-live="polite"></p>
+    </section>
     <header id="navigation-bar" class="toolbar">
       <nav class="nav" aria-label="Navigation">
         <button id="back" title="Quay lại" aria-label="Quay lại">←</button>

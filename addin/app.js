@@ -21,8 +21,39 @@
   let translationLanguage = null;
   let translationVersion = 0;
   let originalNodes = [];
+  let historyNodes = [];
+  let pageNoticeSource = "";
+  let maskedPageNotice = "";
   const translationControllers = new Set();
   const translationCache = new Map();
+  let sensitiveFilter = null;
+  let filterSettings = null;
+  let filterLoadError = null;
+  let pageAddressUrl = "";
+  let maskedPageAddress = "";
+  // Start the local JSON fetch immediately. Navigation waits for this tiny
+  // configuration so unmasked page text is never shown while it loads.
+  const filterReady = fetchFilterSettings()
+    .then(applyFilterSettings)
+    .catch(error => { filterLoadError = error; });
+
+  async function fetchFilterSettings() {
+    const response = await fetch("/api/filter-settings", { cache: "no-store" });
+    const result = await response.json();
+    if (!response.ok || !result.ok || !result.settings) {
+      throw new Error(result.error || "Không thể tải danh sách từ nhạy cảm.");
+    }
+    return result.settings;
+  }
+
+  function applyFilterSettings(settings) {
+    // Construct first. Invalid settings must never replace a working filter.
+    const next = window.SensitiveWordFilter.createSensitiveFilter(settings);
+    sensitiveFilter = next;
+    filterSettings = settings;
+    refreshVisibleFilter();
+    return filterSettings;
+  }
 
   const setStatus = message => { elements.status.textContent = message; };
   const showError = message => {
@@ -71,10 +102,51 @@
       let node;
       while ((node = walker.nextNode())) {
         if (!node.nodeValue.trim() ||
-            node.parentElement.closest(".post-author, .post-toggle, .image-placeholder")) continue;
-        originalNodes.push({ node, source: node.nodeValue });
+            node.parentElement.closest(".post-toggle, .image-placeholder")) continue;
+        originalNodes.push({ node, source: node.nodeValue, display: node.nodeValue,
+          translatable: !node.parentElement.closest(".post-author") });
       }
     }
+    historyNodes = [];
+  }
+
+  function captureHistoryNodes() {
+    historyNodes = [];
+    const root = elements.historyList;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeValue.trim()) historyNodes.push({ node, display: node.nodeValue });
+    }
+  }
+
+  function refreshVisibleFilter() {
+    if (!sensitiveFilter) return;
+    for (const records of [originalNodes, historyNodes]) {
+      for (const { node, display } of records) {
+        node.nodeValue = sensitiveFilter.maskText(display);
+      }
+    }
+    if (pageAddressUrl) {
+      const isMasked = elements.address.value === maskedPageAddress;
+      maskedPageAddress = sensitiveFilter.maskUrl(pageAddressUrl);
+      if (isMasked) elements.address.value = maskedPageAddress;
+    }
+    // Do not overwrite the navigation/loading/error status while a job runs.
+    const stillShowsPageNotice = elements.notice.textContent === maskedPageNotice;
+    maskedPageNotice = sensitiveFilter.maskText(pageNoticeSource);
+    if (stillShowsPageNotice && !elements.content.hidden) {
+      elements.notice.textContent = maskedPageNotice;
+    }
+    updatePostPreviews();
+  }
+
+  function displayAddress(url) {
+    // The input shows a masked URL when idle but retains the real address for
+    // editing and navigation. Never navigate to a string containing "...".
+    pageAddressUrl = url;
+    maskedPageAddress = sensitiveFilter.maskUrl(url);
+    elements.address.value = maskedPageAddress;
   }
 
   function splitTranslationText(source) {
@@ -99,15 +171,20 @@
 
   async function translateVisiblePage() {
     stopTranslation();
-    for (const { node, source } of originalNodes) node.nodeValue = source;
+    for (const entry of originalNodes) {
+      entry.display = entry.source;
+      entry.node.nodeValue = sensitiveFilter.maskText(entry.display);
+    }
     if (!translationLanguage || !originalNodes.length || elements.content.hidden) return;
     const version = translationVersion;
     const language = translationLanguage;
     const pending = [];
 
-    for (const { node, source } of originalNodes) {
+    for (const entry of originalNodes) {
+      const { source, translatable } = entry;
+      if (!translatable) continue;
       const plain = source.trim();
-      if (!/[\p{L}]/u.test(plain) || /^https?:\/\/\S+$/.test(plain)) continue;
+      if (!/[\p{L}]/u.test(plain) || sensitiveFilter.isUrlText(plain)) continue;
       const start = source.indexOf(plain);
       const prefix = source.slice(0, start);
       const suffix = source.slice(start + plain.length);
@@ -115,7 +192,8 @@
       const translated = pieces.map(part => translationCache.get(language + "\u0000" + part) ?? null);
       const display = () => {
         if (translated.every(value => value !== null)) {
-          node.nodeValue = prefix + translated.join("") + suffix;
+          entry.display = prefix + translated.join("") + suffix;
+          entry.node.nodeValue = sensitiveFilter.maskText(entry.display);
         }
       };
       display();
@@ -237,6 +315,7 @@
     if (action !== "more") {
       stopTranslation();
       originalNodes = [];
+      historyNodes = [];
       autoLoadEnabled = false;
       expandedPosts.clear();
       elements.content.replaceChildren();
@@ -247,6 +326,9 @@
     let rendered = false;
     let lastPage = null;
     try {
+      await filterReady;
+      if (version !== requestVersion) return;
+      if (filterLoadError) throw filterLoadError;
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -385,8 +467,10 @@
     const oldScroll = $("viewport").scrollTop;
     const showTitle = Boolean((page.title || "").trim());
     elements.title.textContent = showTitle ? page.title : "";
-    elements.notice.textContent = page.notice || "";
-    elements.address.value = page.url;
+    pageNoticeSource = page.notice || "";
+    maskedPageNotice = sensitiveFilter.maskText(pageNoticeSource);
+    elements.notice.textContent = maskedPageNotice;
+    displayAddress(page.url);
     const hasBlocks = Array.isArray(page.blocks) && page.blocks.length > 0;
     if (hasBlocks) renderBlocks(page.blocks);
     else elements.content.textContent = page.text || "(Không trích xuất được nội dung văn bản.)";
@@ -404,7 +488,6 @@
     showOnly(...(showTitle ? [elements.title] : []), elements.content,
       ...(page.has_more ? [elements.loadMore] : []),
       ...(page.notice ? [elements.notice] : []), ...(hasBlocks ? [] : [elements.links]));
-    if (hasBlocks) updatePostPreviews();
     const postCount = hasBlocks ? page.blocks.filter(block => block.kind === "post").length : 0;
     autoLoadEnabled = !busy && postCount > 0 && Boolean(page.has_more) && !page.notice;
     setStatus(postCount
@@ -417,12 +500,15 @@
       if (target) target.scrollIntoView({ block: "start" });
     }
     captureTextNodes();
-    if (translationLanguage) void translateVisiblePage();
+    // Apply masking synchronously, before the browser can paint this update.
+    void translateVisiblePage();
+    updatePostPreviews();
   }
 
   function showHistory(entries) {
     stopTranslation();
     originalNodes = [];
+    historyNodes = [];
     autoLoadEnabled = false;
     elements.historyList.replaceChildren(make("h2", "Lịch sử (" + entries.length + ")"));
     if (!entries.length) elements.historyList.append(make("p", "Chưa có lịch sử."));
@@ -433,6 +519,8 @@
       list.append(item);
     }
     elements.historyList.append(list);
+    captureHistoryNodes();
+    refreshVisibleFilter();
     showOnly(elements.historyList);
     setStatus("Chọn một trang trong lịch sử để mở lại.");
     $("viewport").scrollTop = 0;
@@ -440,8 +528,21 @@
 
   elements.form.addEventListener("submit", event => {
     event.preventDefault();
-    const command = parseAddress(elements.address.value);
+    const entered = elements.address.value === maskedPageAddress
+      ? pageAddressUrl : elements.address.value;
+    const command = parseAddress(entered);
     if (command) request(command.action, command.value);
+  });
+  elements.address.addEventListener("focus", () => {
+    // Explicitly focusing the field reveals the original URL for editing.
+    if (pageAddressUrl && elements.address.value === maskedPageAddress) {
+      elements.address.value = pageAddressUrl;
+    }
+  });
+  elements.address.addEventListener("blur", () => {
+    if (pageAddressUrl && elements.address.value === pageAddressUrl) {
+      elements.address.value = maskedPageAddress;
+    }
   });
   $("viewport").addEventListener("click", event => {
     const link = event.target.closest("a[data-nav]");
@@ -491,6 +592,27 @@
   $("sample-google").addEventListener("click", () => {
     elements.address.value = "siemens tia portal";
     request("search", "siemens tia portal");
+  });
+
+  window.ReaderFilterSettings.mount({
+    loadSettings: async () => {
+      await filterReady;
+      if (filterLoadError) throw filterLoadError;
+      return applyFilterSettings(await fetchFilterSettings());
+    },
+    saveKeywords: async keywords => {
+      await filterReady;
+      if (filterLoadError) throw filterLoadError;
+      const response = await fetch("/api/filter-settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok || !result.settings) {
+        throw new Error(result.error || "Không thể lưu danh sách lọc.");
+      }
+      return applyFilterSettings(result.settings);
+    }
   });
 
   const initialize = () => {

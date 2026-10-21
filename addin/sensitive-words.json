@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "mask": {
+    "keepFirst": 3,
+    "keepLast": 1,
+    "separator": "..."
+  },
+  "matchWholeWord": true,
+  "compoundSuffixes": ["center", "switch"],
+  "keywords": [
+    "pokemon",
+    "Pokémon",
+    "pokecenter",
+    "Poké Center",
+    "nintendo",
+    "casino"
+  ]
+}

@@ -27,6 +27,48 @@ bounded batches, without opening Neo tabs. Only selected visible page text is
 sent to Google when translation is requested. This endpoint may reject or
 rate-limit requests; the menu displays a translation error when it does.
 
+**Sensitive word masking:** The Excel reading view automatically masks words
+listed in `addin/sensitive-words.json`, for example `pokemon` becomes `pok...n`.
+Matching is case-insensitive, ignores accents and Unicode width differences,
+and matches whole words by default. **Nintendo** is also included by default.
+Displayed URLs additionally match keywords embedded in domain labels or paths:
+`https://www.pokemoncenter-online.com` displays as
+`https://www.pok...ncenter-online.com`. The original clickable link destination
+is never modified; a masked address in the navigation field becomes editable
+as its original URL when that field receives focus and is re-masked on blur.
+The reader also detects keyword boundaries in combined names such as
+`sản phẩmPokemon` and `PokemonCenter`. Common shortened names such as
+`Pokécenter`, `pokecenter`, and the spaced `Poké Center` are configured as
+keyword aliases. For all-lowercase joined names/handles like
+`pokemoncenterPR` or `nintendoswitch`, `compoundSuffixes` (initially `center`
+and `switch`) recognizes a keyword followed immediately by a known suffix,
+without allowing arbitrary matches inside unrelated words such as
+`prepokemon` or `pokemons`. Configure `enabled`, `keywords`,
+`compoundSuffixes`, `matchWholeWord`, and `mask.keepFirst`, `mask.keepLast`,
+`mask.separator` in that
+JSON file; refresh the add-in after changing it. The lightweight JavaScript
+engine lives in `addin/sensitive-filter.js`. It runs before the first page
+render, on progressive page updates, Facebook posts, history labels, and after
+each translation update. Original text and link destinations remain untouched;
+the mask applies only to what the Excel reader displays. This is a visual
+privacy feature, **not data redaction**: unmasked text still exists in the
+browser/backend and may be sent to the translation provider when EN/VI is used.
+If the mask configuration cannot be loaded, navigation stops with an error
+instead of showing unfiltered page text.
+
+**Edit Filter from Excel:** Select **Settings ▾ → Filter** on the pinned reader
+menu. Edit the list in the textbox, **one word or phrase per line**, then
+select **Save**. Empty lines and case-insensitive duplicates are removed. The
+server sorts the entries A–Z (accent-insensitive with stable ties) before
+returning them to the editor, so reopening the panel also shows that order.
+**Cancel** discards unsaved edits. Settings are stored persistently in
+`%LOCALAPPDATA%\bs-in-excel\sensitive-words.json`, outside the Git repo.
+The bundled `addin/sensitive-words.json` provides initial defaults and keeps
+advanced matching rules (`compoundSuffixes`, `matchWholeWord`, and the mask
+format), which the Filter textbox does not alter. Save re-masks the current
+page, original text, translated text, history and displayed URL immediately,
+without navigating the page or requesting another Google translation.
+
 The reusable workbook is `Text Browser.xlsx` next to this README. Its Office
 Content Add-in manifest points to the local trusted catalog at
 `\\localhost\C$\phong\AI\other\bs-in-excel\main\addin`. This path is specific
@@ -163,6 +205,8 @@ beyond the current development period.
     python -m pip install -r requirements.txt
     python -m unittest discover -s tests -v
     node --check addin/app.js
+    node --test tests/test_sensitive_filter.js
+    node --test tests/test_filter_settings_ui.js
 
 The Office Content Add-in was installed using a trusted **FileSystem** catalog
 reference. The earlier dev-settings-generated workbook with the `Registry`
