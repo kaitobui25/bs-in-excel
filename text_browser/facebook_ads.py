@@ -34,7 +34,7 @@ _OFFER = re.compile(
     r"ưu\s*đãi|khuyến\s*m[ạã]i|miễn\s*phí|tặng\s*(?:phí|thêm|ngay)|"
     r"không\s*(?:cần\s*)?(?:đặt\s*cọc|cọc|phí)|"
     r"(?<!\w)(?:combo|deal|sale|discount|limited offer|promotion|free trial|"
-    r"special offer|\d{1,3}\s*%\s*off)(?!\w)|"
+    r"special offer|\d{1,3}\s*%\s*off|starting\s+from\s+only)(?!\w)|"
     r"chỉ\s*từ|giá\s*sốc|cực\s*sốc|siêu\s*tiết\s*kiệm|"
     r"dùng\s*thử\s*miễn\s*phí|割引|無料|キャンペーン|期間限定|特典|格安|"
     r"フリートライアル|お試し|返金保証",
@@ -47,7 +47,8 @@ _PRICE = re.compile(
 )
 _PRODUCT_OR_SERVICE = re.compile(
     r"(?<!\w)(?:sim|esim|wi-?fi|pocket wifi|tour|booking|flight|hotel|"
-    r"data\s*(?:plan|sim)|visa)(?!\w)|"
+    r"data\s*(?:plan|sim)|visa|driver[’']?s?\s+licen[cs]e|"
+    r"driving\s+(?:courses?|schools?|lessons?))(?!\w)|"
     r"vé\s*(?:máy\s*bay|khứ\s*hồi|tết)|phòng\s*vé|"
     r"gói\s*(?:cước|mạng|dịch\s*vụ)|dịch\s*vụ|khách\s*sạn|"
     r"cước\s*(?:mạng|tháng)|giao\s*hàng|mỹ\s*phẩm|bảo\s*hiểm|"
@@ -64,7 +65,8 @@ _BUSINESS_AUTHOR = re.compile(
     r"phòng\s*vé|công\s*ty|dịch\s*vụ|cửa\s*hàng|trung\s*tâm|"
     r"học\s*viện|cửa\s*tiệm|nha\s*khoa|phòng\s*khám|thẩm\s*mỹ|"
     r"(?<!\w)(?:shop|store|agency|travel|tours|wifi|sim|airlines|"
-    r"ltd|company|co\.,?\s*ltd|academy|school|training)(?!\w)|"
+    r"ltd|company|co\.,?\s*ltd|academy|school|training|"
+    r"driving\s+licen[cs]e\s+support)(?!\w)|"
     r"株式会社|有限会社|公式ショップ|専門店|專門店|专门店|"
     r"旅行社|有限公司|學院|学院|補習班|培訓中心|"
     r"潛水|潜水|浮潛|浮潜|ダイビング",
@@ -74,6 +76,7 @@ _BUSINESS_PITCH = re.compile(
     r"chuyên\s*(?:cung\s*cấp|kinh\s*doanh|phân\s*phối|phục\s*vụ)|"
     r"chúng\s*tôi\s*(?:luôn\s*)?(?:sẵn\s*sàng\s*)?hỗ\s*trợ|"
     r"(?:toàn\s*bộ|tất\s*cả)\s*các\s*gói\s*dịch\s*vụ|"
+    r"courses?\s+starting\s+from|"
     r"(?:提供|販売|販売中|受付中|開講中|受講生募集|受講者募集|"
     r"コース開始|資格取得|目指しましょう|招生中|開始招生|"
     r"課程招生|專業服務|專業教學|我們提供|"
@@ -137,6 +140,11 @@ _DOWNLOAD_PROMO = re.compile(
     r"(?:(?:ở|trong)\s*)?(?:bình\s*luận|comment|cmt)",
     re.IGNORECASE,
 )
+_RETAIL_AUTHOR = re.compile(
+    r"trang\s*sức|(?<!\w)(?:jewelry|jewellery|jeweler|jeweller|"
+    r"silver\s+(?:shop|store)|boutique)(?!\w)",
+    re.IGNORECASE,
+)
 
 
 def _normalize(text: str) -> str:
@@ -187,6 +195,11 @@ def is_ad_post(post: dict) -> bool:
     message_button = post.get("pageCta") is True or any(
         _MESSAGE_BUTTON.fullmatch(_normalize(link.get("title", "")).strip()) for link in links
     )
+
+    # A retailer's short slogan/collection teaser is promotional even when
+    # Facebook provides no Sponsored badge, price or purchase button.
+    if _RETAIL_AUTHOR.search(author) and (len(text) <= 180 or product or offer or message_button):
+        return True
 
     # Branded free trials and follow/share prize campaigns often have neither
     # a cash price nor a direct "buy" button (e.g. JP app ads, tech giveaways).

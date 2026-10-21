@@ -246,6 +246,54 @@ class HybridBrowserTests(unittest.TestCase):
             self.assertEqual(browser._rejected_keys, {"mtrend", "global", "diver"})
             browser.close()
 
+    def test_load_more_timeout_keeps_existing_posts_with_notice(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 8
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                "html": "", "posts": [post(key, f"Personal post about hiking with friends {key}")
+                                       for key in "abcde"],
+            }, NeoMcpError("BrowserOS Neo không thực hiện được lệnh: error: run exceeded 30000ms")]
+            browser = FacebookNeo()
+            try:
+                original = browser.navigate("https://www.facebook.com/")
+                later = browser.load_more()
+                self.assertEqual([block["key"] for block in later.blocks],
+                                 [block["key"] for block in original.blocks])
+                self.assertIn("Đã giữ các bài đã tải", later.notice)
+                self.assertEqual(len(page.run.call_args_list), 3)
+            finally:
+                browser.close()
+
+    def test_navigate_timeout_after_preview_preserves_valid_posts(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 8
+            page.run.side_effect = [True, {
+                "title": "Facebook", "url": "https://www.facebook.com/", "signIn": False,
+                "html": "", "posts": [post("one", "Journal from today's walking trip with friends")],
+            }, NeoMcpError("error: run exceeded 30000ms")]
+            browser = FacebookNeo()
+            snapshots = []
+            try:
+                final = browser.navigate("https://www.facebook.com/", on_progress=snapshots.append)
+                self.assertEqual(len(final.blocks), 1)
+                self.assertEqual(len(snapshots), 1)
+                self.assertIn("phản hồi chậm", final.notice)
+            finally:
+                browser.close()
+
+    def test_timeout_before_first_post_still_raises(self):
+        with patch("text_browser.hybrid_browser.NeoPage") as factory:
+            page = factory.return_value
+            page.page_id = 8
+            page.run.side_effect = [True, NeoMcpError("error: run exceeded 30000ms")]
+            browser = FacebookNeo()
+            with self.assertRaises(NeoMcpError):
+                browser.navigate("https://www.facebook.com/")
+            browser.close()
+
 
 if __name__ == "__main__":
     unittest.main()

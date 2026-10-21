@@ -4,6 +4,35 @@ from text_browser.facebook_ads import is_ad_post
 
 
 class FacebookAdsTests(unittest.TestCase):
+    def test_jewelry_page_slogan_without_price_or_sponsored_badge(self):
+        self.assertTrue(is_ad_post({
+            "author": "Moe モエ - Trang sức Bạc tại Japan",
+            "text": "YOU’RE MY SUNSHINE – Vì em là ánh nắng của anh… See more",
+            "links": [{"title": "Moe モエ", "url": "https://www.facebook.com/trangsucmoejp"}],
+        }))
+
+    def test_driving_school_residential_course_promotion(self):
+        self.assertTrue(is_ad_post({
+            "author": "VinaJapan Driving License Support",
+            "text": (
+                "GET YOUR JAPANESE DRIVER’S LICENSE – EASY, CONVENIENT & AFFORDABLE! "
+                "Looking for a convenient way to get your Japanese driver’s license? "
+                "Don’t miss our residential driving courses! Courses starting from only ¥230,000 "
+                "Accommodation + 3 meals a day included. Study at a government-designated "
+                "Japanese driving school. Practical training and testing conducted at the school. "
+                "VINAJAPAN – Your trusted partner on the journey to getting a driver’s license in Japan."
+            ),
+        }))
+
+    def test_personal_jewelry_or_driving_discussions_are_retained(self):
+        for post in (
+            {"author": "Moe", "text": "Hôm nay mình đi xem trang sức bạc cùng bạn bè."},
+            {"author": "VinaJapan", "text": "Câu chuyện về cuộc sống ở Osaka cuối tuần."},
+            {"author": "Bình", "text": "Mình đang học lái xe ở Nhật, nhiều trường có giá khoảng ¥230,000."},
+        ):
+            with self.subTest(post=post):
+                self.assertFalse(is_ad_post(post))
+
     def test_chatgpt_japanese_free_trial_campaign(self):
         ad = {
             "author": "ChatGPT",

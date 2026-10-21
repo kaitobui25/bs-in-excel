@@ -33,12 +33,11 @@ FACEBOOK_POSTS = r"""
   const main = document.querySelector('[role="main"]') || document.querySelector('main');
   // Facebook's current home feed puts posts in message cards but keeps empty
   // role=article shells. Prefer each message card even when article shells exist.
-  const messages = main ? [...main.querySelectorAll('[data-ad-preview="message"]')] : [];
+  const messages = main ? [...main.querySelectorAll('[data-ad-preview="message"]')].slice(-18) : [];
   let candidates = messages.map(message => {
     let card = message;
     for (let parent = message.parentElement; parent && main.contains(parent); parent = parent.parentElement) {
-      const length = (parent.innerText || '').trim().length;
-      if (!length || parent.querySelectorAll('[data-ad-preview="message"]').length !== 1) break;
+      if (parent.querySelectorAll('[data-ad-preview="message"]').length !== 1) break;
       if (parent.querySelector('h3, h4')) {
         card = parent;
         break; // The nearest author header bounds this post; outer wrappers contain feed UI.
@@ -48,10 +47,10 @@ FACEBOOK_POSTS = r"""
   });
   if (!candidates.length) {
     const feed = document.querySelector('[role="feed"]');
-    candidates = [...document.querySelectorAll('[role="article"]')];
+    candidates = [...document.querySelectorAll('[role="article"]')].slice(-20);
     if (feed) candidates = candidates.filter(el => feed.contains(el));
     if (!candidates.some(el => (el.innerText || '').trim().length >= 35)) {
-      candidates = [...document.querySelectorAll('[data-pagelet*="FeedUnit"]')];
+      candidates = [...document.querySelectorAll('[data-pagelet*="FeedUnit"]')].slice(-20);
     }
   }
   candidates = candidates.filter(el => visible(el) &&
@@ -110,8 +109,9 @@ FACEBOOK_POSTS = r"""
 FACEBOOK_EXPAND = r"""
 () => {
   let expanded = 0;
-  for (const button of document.querySelectorAll('[role="article"] [role="button"], [data-pagelet*="FeedUnit"] [role="button"], [data-ad-preview="message"] span, [data-ad-preview="message"] [role="button"]')) {
-    if (expanded >= 12) break;
+  const buttons = [...document.querySelectorAll('[role="article"] [role="button"], [data-pagelet*="FeedUnit"] [role="button"], [data-ad-preview="message"] span, [data-ad-preview="message"] [role="button"]')].slice(-120);
+  for (const button of buttons) {
+    if (expanded >= 8) break;
     const label = (button.innerText || '').trim();
     if (/^(?:…\s*)?(See more|Xem thêm|もっと見る)$/i.test(label)) {
       (button.closest('[role="button"]') || button).click();
@@ -136,6 +136,7 @@ class FacebookNeo:
         self._posts: dict[str, dict] = {}
         self._rejected_keys: set[str] = set()
         self._ads_filtered = 0
+        self._scan_timed_out = False
         self._url = ""
         self._title = "Facebook"
 
@@ -147,6 +148,7 @@ class FacebookNeo:
             self._posts.clear()
             self._rejected_keys.clear()
             self._ads_filtered = 0
+            self._scan_timed_out = False
             try:
                 self._page.run("return true;", url=url)
                 info = self._gather_posts(5 if is_feed else 1, 6 if is_feed else 0,
@@ -160,7 +162,7 @@ class FacebookNeo:
                 if attempt or self._page.page_id is not None:
                     raise
         if self._posts:
-            return self._feed_page()
+            return self._feed_page(notice=self._timeout_notice() if self._scan_timed_out else "")
         if self._ads_filtered:
             return PageData(title=self._title, url=self._url, text="", links=[], blocks=[],
                             notice="Đã ẩn bài viết quảng cáo; chưa có bài thông thường để hiển thị.")
@@ -174,18 +176,27 @@ class FacebookNeo:
 
     def _gather_posts(self, new_posts: int, scrolls: int,
                       on_progress: Callable[[PageData], None] | None = None) -> dict:
-        # Each bounded run scrolls at most twice. Stop when the goal is met,
+        # Each bounded run scrolls at most once. Stop when the goal is met,
         # at the login wall, or after the requested scroll budget.
         remaining = scrolls
+        self._scan_timed_out = False
         before = len(self._posts)
         previous = tuple((key, hash(post["text"])) for key, post in self._posts.items())
         first = True
         while True:
             # First read without scrolling: emit available posts before doing
             # the slower multi-scroll feed scan.
-            chunk = 0 if first and on_progress else min(remaining, 2)
+            chunk = 0 if first and on_progress else min(remaining, 1)
             first = False
-            info = self._collect_feed(max(1, new_posts - (len(self._posts) - before)), chunk)
+            try:
+                info = self._collect_feed(max(1, new_posts - (len(self._posts) - before)), chunk)
+            except NeoMcpError as exc:
+                # Neo hard-caps each run at 30 seconds. Keep already validated
+                # posts if a later scan times out instead of discarding them.
+                if self._posts and "run exceeded 30000ms" in str(exc).lower():
+                    self._scan_timed_out = True
+                    return {"title": self._title, "url": self._url, "signIn": False, "html": ""}
+                raise
             snapshot = tuple((key, hash(post["text"])) for key, post in self._posts.items())
             if on_progress and snapshot and snapshot != previous:
                 on_progress(self._feed_page())
@@ -264,6 +275,10 @@ return { ...meta, html, filteredAds, rejectedKeys: [...rejected],
                 self._posts[key] = post
         return info
 
+    @staticmethod
+    def _timeout_notice() -> str:
+        return "BrowserOS Neo phản hồi chậm. Đã giữ các bài đã tải; hãy thử Tải thêm bài viết."
+
     def _feed_page(self, notice: str = "") -> PageData:
         blocks = []
         links = []
@@ -290,7 +305,8 @@ return { ...meta, html, filteredAds, rejectedKeys: [...rejected],
         before = len(self._posts)
         self._gather_posts(new_posts=min(4, MAX_FEED_POSTS - before), scrolls=6,
                            on_progress=on_progress)
-        note = "Không tìm thấy bài mới. Hãy thử tải lại Bảng tin." if len(self._posts) == before else ""
+        note = (self._timeout_notice() if self._scan_timed_out else
+                "Không tìm thấy bài mới. Hãy thử tải lại Bảng tin." if len(self._posts) == before else "")
         return self._feed_page(notice=note)
 
     def close(self) -> None:
